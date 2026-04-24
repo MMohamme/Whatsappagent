@@ -52,6 +52,12 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            val log = throwable.stackTraceToString()
+            applicationContext.openFileOutput("crash_log.txt", Context.MODE_APPEND).use {
+                it.write(log.toByteArray())
+            }
+        }
         super.onCreate(savedInstanceState)
 
         AgentLogger.init(applicationContext)
