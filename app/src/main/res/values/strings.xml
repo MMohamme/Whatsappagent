@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Whatsappagent</string>
+    <string name="accessibility_description">Dieser Dienst ermöglicht es dem WhatsApp Agent, auf Nachrichten zu reagieren.</string>
+</resources>
