@@ -19,8 +19,8 @@ class AgentService : Service() {
     private val BASE_URL = "https://humming-opposite-deforest.ngrok-free.dev"
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(5, TimeUnit.SECONDS)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
     private var isConnected = false

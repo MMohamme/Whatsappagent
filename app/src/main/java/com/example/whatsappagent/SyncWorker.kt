@@ -8,10 +8,12 @@ import androidx.work.WorkerParameters
 import com.example.whatsappagent.AgentLogger
 import com.example.whatsappagent.WhatsAppListener
 import com.example.whatsappagent.data.AppDatabase
+import com.example.whatsappagent.data.MessageEntity
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -28,24 +30,38 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         val db = AppDatabase.getDatabase(applicationContext)
         val dao = db.messageDao()
 
-        // 1. Alle ausstehenden Nachrichten holen (FIFO)
         val pendingMessages = dao.getPendingMessages()
 
         if (pendingMessages.isEmpty()) {
             return Result.success()
         }
 
-        AgentLogger.log(AgentLogger.LogType.INFO, "🔄 SyncWorker gestartet: ${pendingMessages.size} Nachrichten in der Queue.")
+        AgentLogger.log(AgentLogger.LogType.INFO, "🔄 SyncWorker: ${pendingMessages.size} Nachrichten in Queue.")
 
         var allSuccessful = true
 
         for (msg in pendingMessages) {
             try {
-                // 2. JSON Payload für FastAPI bauen
+                // 1. Gesprächsverlauf aus Room holen (user + assistant, älteste zuerst)
+                //    Die aktuelle Nachricht ist noch nicht committed, daher schließen
+                //    wir sie über customId aus — sie kommt als "text" im Payload.
+                val historyRaw = dao.getLastMessages(msg.sender, limit = 12).reversed()
+                val history = historyRaw.filter { it.customId != msg.customId }
+
+                val historyArray = JSONArray()
+                for (h in history) {
+                    historyArray.put(JSONObject().apply {
+                        put("role", h.role)   // "user" oder "assistant"
+                        put("text", h.text)
+                    })
+                }
+
+                // 2. Payload bauen
                 val json = JSONObject().apply {
                     put("custom_id", msg.customId)
                     put("sender", msg.sender)
                     put("text", msg.text)
+                    put("history", historyArray)
                 }
 
                 val body = json.toString().toRequestBody("application/json".toMediaTypeOrNull())
@@ -55,49 +71,63 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                     .addHeader("ngrok-skip-browser-warning", "1")
                     .build()
 
-                // 3. Synchroner Call an das Backend
+                // 3. API-Call
                 val response = client.newCall(request).execute()
 
                 if (response.isSuccessful) {
                     val rawBody = response.body?.string()
                     val reply = rawBody?.let { JSONObject(it).optString("reply") }
 
-                    // --- DEINE LOGIK HIER ---
-                    if (!reply.isNullOrBlank() && reply != "Bereits verarbeitet") {
-                        // 1. In DB als synchronisiert markieren
-                        dao.markAsSynced(msg.customId)
-                        AgentLogger.log(AgentLogger.LogType.BACKEND, "✅ Gesendet & Gespeichert: ${msg.customId}")
+                    when {
+                        !reply.isNullOrBlank() && reply != "Bereits verarbeitet" -> {
+                            // User-Nachricht als synced markieren
+                            dao.markAsSynced(msg.customId)
 
-                        // 2. Broadcast an den WhatsAppListener senden!
-                        val intent = Intent(WhatsAppListener.ACTION_SEND_REPLY).apply {
-                            putExtra(WhatsAppListener.EXTRA_SENDER, msg.sender)
-                            putExtra(WhatsAppListener.EXTRA_REPLY, reply)
+                            // Agent-Antwort als "assistant"-Eintrag in Room speichern
+                            // (sender = gleicher Kontakt, damit getLastMessages() sie mitliefert)
+                            val replyEntity = MessageEntity(
+                                customId = "reply_${msg.customId}",
+                                sender = msg.sender,
+                                text = reply,
+                                role = "assistant",
+                                isSynced = true   // ist bereits "gesendet", muss nicht nochmal in Queue
+                            )
+                            dao.insertMessage(replyEntity)
+
+                            AgentLogger.log(AgentLogger.LogType.BACKEND, "✅ Synced & Reply gespeichert: ${msg.sender}")
+
+                            // Broadcast → WhatsAppListener sendet via RemoteInput
+                            val intent = Intent(WhatsAppListener.ACTION_SEND_REPLY).apply {
+                                putExtra(WhatsAppListener.EXTRA_SENDER, msg.sender)
+                                putExtra(WhatsAppListener.EXTRA_REPLY, reply)
+                            }
+                            LocalBroadcastManager.getInstance(applicationContext).sendBroadcast(intent)
                         }
-                        LocalBroadcastManager.getInstance(applicationContext).sendBroadcast(intent)
-
-                    } else if (reply == "Bereits verarbeitet") {
-                        // Backend hat sie schon, also aus lokaler Queue entfernen
-                        dao.markAsSynced(msg.customId)
-                        AgentLogger.log(AgentLogger.LogType.INFO, "⏭ Duplikat vom Backend bestätigt: ${msg.customId}")
+                        reply == "Bereits verarbeitet" -> {
+                            dao.markAsSynced(msg.customId)
+                            AgentLogger.log(AgentLogger.LogType.INFO, "⏭ Duplikat: ${msg.customId}")
+                        }
+                        else -> {
+                            AgentLogger.log(AgentLogger.LogType.ERROR, "⚠️ Leere Antwort vom Backend für ${msg.customId}")
+                            allSuccessful = false
+                        }
                     }
-                    // -------------------------
 
                 } else {
-                    AgentLogger.log(AgentLogger.LogType.ERROR, "❌ HTTP Error ${response.code} für ${msg.customId}")
+                    AgentLogger.log(AgentLogger.LogType.ERROR, "❌ HTTP ${response.code} für ${msg.customId}")
                     allSuccessful = false
                 }
 
             } catch (e: IOException) {
-                AgentLogger.log(AgentLogger.LogType.ERROR, "❌ Netzwerkfehler im Worker: ${e.message}")
+                AgentLogger.log(AgentLogger.LogType.ERROR, "❌ Netzwerkfehler: ${e.message}")
                 allSuccessful = false
-                break // Schleife abbrechen, wir haben kein Internet, Rest bleibt in der Queue
+                break
             } catch (e: Exception) {
-                AgentLogger.log(AgentLogger.LogType.ERROR, "❌ Unerwarteter Fehler im Worker: ${e.message}")
+                AgentLogger.log(AgentLogger.LogType.ERROR, "❌ Fehler im Worker: ${e.message}")
                 allSuccessful = false
             }
         }
 
-        // 5. Wenn auch nur eine Nachricht fehlschlägt, den Worker später erneut versuchen lassen
         return if (allSuccessful) Result.success() else Result.retry()
     }
 }
