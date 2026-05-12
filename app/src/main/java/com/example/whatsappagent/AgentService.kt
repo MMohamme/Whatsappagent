@@ -24,6 +24,8 @@ class AgentService : Service() {
         .build()
 
     private var isConnected = false
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var healthCheckRunnable: Runnable? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -39,14 +41,60 @@ class AgentService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun startHealthCheck() {
-        val handler = android.os.Handler(mainLooper)
-        val runnable = object : Runnable {
+        healthCheckRunnable = object : Runnable {
             override fun run() {
                 checkBackend()
+                checkNotificationListener()
                 handler.postDelayed(this, 5000)
             }
         }
-        handler.post(runnable)
+        healthCheckRunnable?.let { handler.post(it) }
+    }
+
+    private fun checkNotificationListener() {
+        val application = applicationContext
+        val now = System.currentTimeMillis()
+        val COOLDOWN = 60_000L // 1 minute rebind cooldown
+
+        if (isNotificationServiceEnabled(application)) {
+            val isRunning = WhatsAppListener.isRunning && isListenerActuallyConnected()
+            
+            if (!isRunning) {
+                if (now - WhatsAppListener.lastRebindRequestAt < COOLDOWN) {
+                    return
+                }
+                
+                Log.d("WA_AGENT", "Listener inactive. Requesting rebind...")
+                WhatsAppListener.lastRebindRequestAt = now
+                try {
+                    android.service.notification.NotificationListenerService.requestRebind(
+                        android.content.ComponentName(application, WhatsAppListener::class.java)
+                    )
+                } catch (e: Exception) {
+                    Log.e("WA_AGENT", "Failed to request rebind: ${e.message}")
+                }
+            }
+        }
+    }
+
+    private fun isListenerActuallyConnected(): Boolean {
+        val inst = WhatsAppListener.instance ?: return false
+        return try {
+            inst.activeNotifications != null // Check binder validity
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun isNotificationServiceEnabled(context: android.content.Context): Boolean {
+        val packageNames = android.provider.Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
+        return packageNames != null && packageNames.contains(context.packageName)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        healthCheckRunnable?.let { handler.removeCallbacks(it) }
     }
 
     private fun checkBackend() {

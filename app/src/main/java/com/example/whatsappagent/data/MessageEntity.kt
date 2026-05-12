@@ -18,5 +18,7 @@ data class MessageEntity(
     val text: String,
     val role: String = "user",          // NEU: "user" oder "assistant"
     val timestamp: Long = System.currentTimeMillis(),
-    val isSynced: Boolean = false
+    val isSynced: Boolean = false,
+    val phoneNumber: String? = null,
+    val status: MessageStatus = MessageStatus.CAPTURED
 )
