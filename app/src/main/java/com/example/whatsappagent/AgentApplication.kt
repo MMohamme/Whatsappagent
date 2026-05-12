@@ -12,12 +12,19 @@ import java.util.concurrent.TimeUnit
 
 class AgentApplication : Application() {
 
-    private val BASE_URL = "https://humming-opposite-deforest.ngrok-free.dev/"
+    private val BASE_URL = BuildConfig.BACKEND_BASE_URL
 
     val database: AppDatabase by lazy { AppDatabase.getDatabase(this) }
     
     val apiService: AgentApiService by lazy {
         val okHttpClient = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val request = chain.request().newBuilder()
+                    .addHeader("Authorization", "Bearer ${BuildConfig.APP_API_TOKEN}")
+                    .addHeader("ngrok-skip-browser-warning", "1")
+                    .build()
+                chain.proceed(request)
+            }
             .addInterceptor(HttpLoggingInterceptor().apply {
                 level = HttpLoggingInterceptor.Level.HEADERS
             })

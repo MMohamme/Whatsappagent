@@ -20,5 +20,11 @@ data class MessageEntity(
     val timestamp: Long = System.currentTimeMillis(),
     val isSynced: Boolean = false,
     val phoneNumber: String? = null,
-    val status: MessageStatus = MessageStatus.CAPTURED
+    val status: MessageStatus = MessageStatus.CAPTURED,
+    val backendMessageId: Long? = null,
+    val draftId: Long? = null,
+    val sendAttemptId: Long? = null,
+    val notificationKey: String? = null,
+    val textHash: String? = null,
+    val packageName: String? = null
 )

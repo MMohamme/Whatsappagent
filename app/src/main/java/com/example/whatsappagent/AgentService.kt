@@ -16,7 +16,7 @@ class AgentService : Service() {
     private val CHANNEL_ID = "agent_channel"
     private val NOTIF_ID = 1
 
-    private val BASE_URL = "https://humming-opposite-deforest.ngrok-free.dev"
+    private val BASE_URL = BuildConfig.BACKEND_BASE_URL.trimEnd('/')
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -100,6 +100,7 @@ class AgentService : Service() {
     private fun checkBackend() {
         val request = Request.Builder()
             .url("$BASE_URL/health")
+            .addHeader("Authorization", "Bearer ${BuildConfig.APP_API_TOKEN}")
             .addHeader("ngrok-skip-browser-warning", "1")
             .get()
             .build()

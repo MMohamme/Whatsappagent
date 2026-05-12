@@ -12,7 +12,7 @@
 
     <application
         android:name=".AgentApplication"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
@@ -38,7 +38,7 @@
             android:name=".WhatsAppListener"
             android:label="WhatsApp Listener"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService"/>
             </intent-filter>
@@ -48,7 +48,7 @@
         <service
             android:name=".AgentService"
             android:foregroundServiceType="specialUse"
-            android:exported="true">
+            android:exported="false">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Agent for processing notifications"/>
         </service>
@@ -58,7 +58,7 @@
             android:name=".AutoReplyService"
             android:label="WhatsApp Auto Reply"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService"/>
             </intent-filter>

@@ -16,4 +16,28 @@ class Converters {
             MessageStatus.CAPTURED
         }
     }
+
+    @TypeConverter
+    fun fromNoteType(type: NoteType): String = type.name
+
+    @TypeConverter
+    fun toNoteType(type: String): NoteType {
+        return try {
+            NoteType.valueOf(type)
+        } catch (e: Exception) {
+            NoteType.CUSTOM
+        }
+    }
+
+    @TypeConverter
+    fun fromNoteScope(scope: NoteScope): String = scope.name
+
+    @TypeConverter
+    fun toNoteScope(scope: String): NoteScope {
+        return try {
+            NoteScope.valueOf(scope)
+        } catch (e: Exception) {
+            NoteScope.CONTACT
+        }
+    }
 }

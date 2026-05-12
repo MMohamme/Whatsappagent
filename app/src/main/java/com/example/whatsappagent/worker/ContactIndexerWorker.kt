@@ -20,12 +20,19 @@ class ContactIndexerWorker(context: Context, params: WorkerParameters) : Corouti
 
     private val apiService: AgentApiService by lazy {
         val okHttpClient = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val request = chain.request().newBuilder()
+                    .addHeader("Authorization", "Bearer ${com.example.whatsappagent.BuildConfig.APP_API_TOKEN}")
+                    .addHeader("ngrok-skip-browser-warning", "1")
+                    .build()
+                chain.proceed(request)
+            }
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .build()
 
         val retrofit = Retrofit.Builder()
-            .baseUrl("https://humming-opposite-deforest.ngrok-free.dev/")
+            .baseUrl(com.example.whatsappagent.BuildConfig.BACKEND_BASE_URL)
             .client(okHttpClient)
             .addConverterFactory(GsonConverterFactory.create())
             .build()

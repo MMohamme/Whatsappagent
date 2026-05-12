@@ -5,6 +5,13 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+val backendBaseUrl = providers.gradleProperty("BACKEND_BASE_URL")
+    .orElse("https://humming-opposite-deforest.ngrok-free.dev/")
+    .get()
+val appApiToken = providers.gradleProperty("APP_API_TOKEN")
+    .orElse("dev-token-change-me")
+    .get()
+
 android {
     namespace = "com.example.whatsappagent"
     compileSdk = 36
@@ -15,7 +22,8 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
-        //buildConfigField("String", "BACKEND_BASE_URL", "\"https://humming-opposite-deforest.ngrok-free.dev\"")
+        buildConfigField("String", "BACKEND_BASE_URL", "\"$backendBaseUrl\"")
+        buildConfigField("String", "APP_API_TOKEN", "\"$appApiToken\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

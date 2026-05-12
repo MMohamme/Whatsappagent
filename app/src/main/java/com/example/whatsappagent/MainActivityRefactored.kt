@@ -177,6 +177,13 @@ fun WhatsAppAgentApp() {
  */
 private fun createApiService(): AgentApiService {
     val okHttpClient = OkHttpClient.Builder()
+        .addInterceptor { chain ->
+            val request = chain.request().newBuilder()
+                .addHeader("Authorization", "Bearer ${BuildConfig.APP_API_TOKEN}")
+                .addHeader("ngrok-skip-browser-warning", "1")
+                .build()
+            chain.proceed(request)
+        }
         .addInterceptor(HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BODY
         })
@@ -186,7 +193,7 @@ private fun createApiService(): AgentApiService {
         .build()
 
     val retrofit = Retrofit.Builder()
-        .baseUrl("https://humming-opposite-deforest.ngrok-free.dev/")
+        .baseUrl(BuildConfig.BACKEND_BASE_URL)
         .client(okHttpClient)
         .addConverterFactory(GsonConverterFactory.create())
         .build()

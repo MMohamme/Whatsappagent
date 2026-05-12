@@ -13,10 +13,13 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MessageEntity::class,
         NoteEntity::class,
         EventEntity::class,
+        EventTicketEntity::class,
+        EventRecipientEntity::class,
+        SendAttemptEntity::class,
         ContactSettingsEntity::class,
         ContactCacheEntity::class
     ], 
-    version = 6,
+    version = 8,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -25,6 +28,9 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao
     abstract fun noteDao(): NoteDao
     abstract fun eventDao(): EventDao
+    abstract fun eventTicketDao(): EventTicketDao
+    abstract fun eventRecipientDao(): EventRecipientDao
+    abstract fun sendAttemptDao(): SendAttemptDao
     abstract fun contactSettingsDao(): ContactSettingsDao
     abstract fun contactCacheDao(): ContactCacheDao
 
@@ -85,6 +91,7 @@ abstract class AppDatabase : RoomDatabase() {
                     "whatsapp_agent_db"
                 )
                     .addMigrations(MIGRATION_5_6)
+                    .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance
                 instance

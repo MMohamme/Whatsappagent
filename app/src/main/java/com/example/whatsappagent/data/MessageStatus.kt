@@ -1,11 +1,24 @@
 package com.example.whatsappagent.data
 
 enum class MessageStatus {
-    CAPTURED,       // Nachricht empfangen, noch nicht gesynct
-    SYNCING,        // API-Call läuft
-    DONE,           // AI-Reply generiert (veraltet, wird durch REPLY_SENT ersetzt)
-    REPLY_PENDING,  // Reply wurde an Listener gesendet, Bestätigung steht aus
-    REPLY_SENT,     // Reply erfolgreich zugestellt
-    REPLY_FAILED,   // Alle Versuche fehlgeschlagen
-    SYNC_FAILED     // Backend nicht erreichbar
+    RECEIVED,
+    DEDUPED,
+    CLASSIFIED,
+    DRAFTED,
+    NEEDS_REVIEW,
+    SEND_PENDING,
+    SENDING,
+    SENT,
+    FAILED,
+    SKIPPED,
+    BLOCKED,
+
+    // Legacy statuses kept during the v3 transition.
+    CAPTURED,
+    SYNCING,
+    DONE,
+    REPLY_PENDING,
+    REPLY_SENT,
+    REPLY_FAILED,
+    SYNC_FAILED
 }

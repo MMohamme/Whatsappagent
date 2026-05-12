@@ -13,3 +13,13 @@
 .externalNativeBuild
 .cxx
 local.properties
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+*.log
+crash_log.txt
+logs/
+backups/

@@ -44,14 +44,19 @@ data class CategoryCount(
 
 // --- CONTACT ---
 data class ContactResponse(
+    @SerializedName("id") val id: Long? = null,
     @SerializedName("contact_name") val contactName: String,
+    @SerializedName("display_name") val displayName: String? = null,
+    @SerializedName("phone_number") val phoneNumber: String? = null,
     @SerializedName("relation_type") val relationType: String,
     @SerializedName("specific_relation") val specificRelation: String? = null,
     @SerializedName("preferred_lang") val preferredLang: String? = null,
     @SerializedName("behavior_rules") val behaviorRules: String? = null,
     @SerializedName("replies_count") val repliesCount: Int = 0,
     @SerializedName("last_seen") val lastSeen: String? = null,
-    @SerializedName("active") val active: Boolean = true
+    @SerializedName("active") val active: Boolean = true,
+    @SerializedName("auto_mode") val autoMode: String? = null,
+    @SerializedName("categories") val categories: List<String> = emptyList()
 )
 
 data class ContactCreate(
@@ -159,5 +164,108 @@ data class MessageSchema(
     @SerializedName("custom_id") val customId: String,
     @SerializedName("sender") val sender: String,
     @SerializedName("text") val text: String,
+    @SerializedName("history") val history: List<Map<String, String>> = emptyList(),
+    @SerializedName("sender_display_name") val senderDisplayName: String = sender,
+    @SerializedName("phone_number") val phoneNumber: String? = null,
+    @SerializedName("package_name") val packageName: String? = null,
+    @SerializedName("notification_key") val notificationKey: String? = null,
+    @SerializedName("timestamp") val timestamp: String? = null
+)
+
+data class InboundMessageRequest(
+    @SerializedName("custom_id") val customId: String,
+    @SerializedName("sender_display_name") val senderDisplayName: String,
+    @SerializedName("text") val text: String,
+    @SerializedName("phone_number") val phoneNumber: String? = null,
+    @SerializedName("package_name") val packageName: String? = null,
+    @SerializedName("notification_key") val notificationKey: String? = null,
+    @SerializedName("timestamp") val timestamp: String? = null,
     @SerializedName("history") val history: List<Map<String, String>> = emptyList()
+)
+
+data class AgentDecisionResponse(
+    @SerializedName("decision") val decision: String,
+    @SerializedName("message_id") val messageId: Long,
+    @SerializedName("draft_id") val draftId: Long? = null,
+    @SerializedName("reply") val reply: String? = null,
+    @SerializedName("risk_level") val riskLevel: String,
+    @SerializedName("reason") val reason: String,
+    @SerializedName("recommended_delay_ms") val recommendedDelayMs: Long = 0
+)
+
+data class NoteRequest(
+    @SerializedName("scope") val scope: String,
+    @SerializedName("content") val content: String,
+    @SerializedName("contact_id") val contactId: Long? = null,
+    @SerializedName("category") val category: String? = null,
+    @SerializedName("pinned") val pinned: Boolean = false,
+    @SerializedName("priority") val priority: Int = 0,
+    @SerializedName("valid_from") val validFrom: String? = null,
+    @SerializedName("expires_at") val expiresAt: String? = null
+)
+
+data class EventTicketRequest(
+    @SerializedName("title") val title: String,
+    @SerializedName("target_type") val targetType: String,
+    @SerializedName("scheduled_at") val scheduledAt: String,
+    @SerializedName("target_contact_id") val targetContactId: Long? = null,
+    @SerializedName("target_category") val targetCategory: String? = null,
+    @SerializedName("base_text") val baseText: String? = null,
+    @SerializedName("prompt") val prompt: String? = null,
+    @SerializedName("stagger_min_seconds") val staggerMinSeconds: Int = 20,
+    @SerializedName("stagger_max_seconds") val staggerMaxSeconds: Int = 90
+)
+
+data class EventTicketResponse(
+    @SerializedName("id") val id: Long,
+    @SerializedName("title") val title: String,
+    @SerializedName("target_type") val targetType: String,
+    @SerializedName("target_contact_id") val targetContactId: Long? = null,
+    @SerializedName("target_category") val targetCategory: String? = null,
+    @SerializedName("scheduled_at") val scheduledAt: String,
+    @SerializedName("base_text") val baseText: String? = null,
+    @SerializedName("prompt") val prompt: String? = null,
+    @SerializedName("status") val status: String,
+    @SerializedName("recipients_count") val recipientsCount: Int = 0,
+    @SerializedName("recipients") val recipients: List<EventRecipientResponse> = emptyList()
+)
+
+data class EventRecipientResponse(
+    @SerializedName("id") val id: Long,
+    @SerializedName("ticket_id") val ticketId: Long,
+    @SerializedName("contact_id") val contactId: Long,
+    @SerializedName("contact_name") val contactName: String?,
+    @SerializedName("draft_id") val draftId: Long? = null,
+    @SerializedName("status") val status: String,
+    @SerializedName("scheduled_at") val scheduledAt: String,
+    @SerializedName("error") val error: String? = null,
+    @SerializedName("draft") val draft: DraftResponse? = null
+)
+
+data class DraftResponse(
+    @SerializedName("id") val id: Long,
+    @SerializedName("message_id") val messageId: Long? = null,
+    @SerializedName("event_recipient_id") val eventRecipientId: Long? = null,
+    @SerializedName("reply") val reply: String,
+    @SerializedName("decision") val decision: String,
+    @SerializedName("risk_level") val riskLevel: String,
+    @SerializedName("reason") val reason: String? = null,
+    @SerializedName("recommended_delay_ms") val recommendedDelayMs: Long = 0
+)
+
+data class SendAttemptRequest(
+    @SerializedName("channel") val channel: String = "ANDROID_REMOTE_INPUT"
+)
+
+data class SendAttemptUpdate(
+    @SerializedName("status") val status: String,
+    @SerializedName("error") val error: String? = null
+)
+
+data class SendAttemptResponse(
+    @SerializedName("id") val id: Long,
+    @SerializedName("draft_id") val draftId: Long? = null,
+    @SerializedName("status") val status: String,
+    @SerializedName("channel") val channel: String? = null,
+    @SerializedName("sent_at") val sentAt: String? = null
 )

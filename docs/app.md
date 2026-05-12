@@ -1,4 +1,53 @@
-# Project Log (WA Agent v2.1)
+# Project Log (WA Agent)
+
+## [2026-05-12] v3 Pfad A Foundation
+
+### Backend Consolidation
+*   **Action**: Backend-Dateien wurden in `backend/` zusammengefuehrt.
+*   **Files**: `backend/main.py`, `backend/database.py`, `backend/migrate.py`, `backend/README.md`.
+*   **Result**: Der Projekt-Root ist aufgeraeumt; Backend kann mit `python -m uvicorn backend.main:app --reload` gestartet werden.
+
+### Documentation Consolidation
+*   **Action**: Markdown-Dokumente wurden in `docs/` gesammelt und auf v3 aktualisiert.
+*   **Files**: `docs/README.md`, `docs/agent_handbook.md`, `docs/BACKEND_INTEGRATION_GUIDE.md`, `docs/databank.md`, `docs/project_specification_deep_dive.md`.
+*   **Result**: Neue Chats/Agenten haben eine aktuelle Quelle fuer Architektur, Datenmodell und API.
+
+### Backend v3 Data Model
+*   **Action**: Clean-Reset-freundliches SQLAlchemy-Modell eingefuehrt.
+*   **Entities**: Contacts, ContactRules, ContactCategories, Messages, Drafts, SendAttempts, Notes, EventTickets, EventRecipients, Events, AuditLogs.
+*   **Result**: Draft, Entscheidung und echter Versand sind getrennt.
+
+### Auth and Configuration
+*   **Action**: Bearer Token fuer Backend-Requests eingefuehrt.
+*   **Android**: `BuildConfig.BACKEND_BASE_URL` und `BuildConfig.APP_API_TOKEN`.
+*   **Backend**: Environment-basierte Settings ueber `.env.example`.
+*   **Result**: Hartcodierte ngrok-URLs sind aus den zentralen Android-Pfaden entfernt.
+
+### Notes and Event Tickets
+*   **Action**: Globale, Kategorie- und Kontakt-Notizen modelliert.
+*   **Action**: Event/Ticket-Modell fuer Kategorie- und Einzelkontakt-Auftraege eingefuehrt.
+*   **Result**: Feiertagsgruesse an z.B. `EXTENDED_FAMILY` koennen vorbereitet, reviewed und pro Empfaenger verfolgt werden.
+
+### Android Room v8 and Sync
+*   **Action**: Room auf v8 mit Clean Reset aktualisiert.
+*   **Action**: Lokale Tabellen fuer Notes, EventTickets, EventRecipients und SendAttempts ergaenzt.
+*   **Action**: `SyncWorker` nutzt `/messages/inbound` und speichert neue Decisions.
+*   **Result**: Android ist auf den v3-Backend-Contract vorbereitet.
+
+### Verification
+*   **Build**: Android Kotlin Compile wurde erfolgreich ausgefuehrt:
+
+```powershell
+$env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
+.\gradlew.bat :app:compileDebugKotlin
+```
+
+### Open Follow-Up
+*   **SendAttempt**: RemoteInput/Accessibility muessen noch voll auf v3-Statusrueckmeldung verdrahtet werden.
+*   **UI**: Die App soll als Review/Events/Tickets-Kontrollzentrum neu designt werden.
+*   **Tests**: Backend/Android Tests fuer Policy, Notes, Events, Dedupe und Statusflow fehlen noch.
+
+## Historical Log: WA Agent v2.1
 
 ## [2024-05-21] Version 2.1 Feature Expansion & Stability
 

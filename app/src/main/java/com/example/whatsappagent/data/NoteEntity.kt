@@ -15,7 +15,13 @@ data class NoteEntity(
     val type: NoteType,
     val text: String,
     val createdAt: Long = System.currentTimeMillis(),
-    val expiresAtMillis: Long? = null
+    val expiresAtMillis: Long? = null,
+    val scope: NoteScope = NoteScope.CONTACT,
+    val category: String? = null,
+    val pinned: Boolean = false,
+    val priority: Int = 0,
+    val validFromMillis: Long? = null,
+    val backendId: Long? = null
 )
 
 enum class NoteType {
@@ -23,4 +29,10 @@ enum class NoteType {
     REMINDER,
     INFO,
     CUSTOM
+}
+
+enum class NoteScope {
+    GLOBAL,
+    CATEGORY,
+    CONTACT
 }

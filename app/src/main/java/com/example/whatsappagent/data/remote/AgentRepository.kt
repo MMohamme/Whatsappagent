@@ -119,6 +119,46 @@ class AgentRepository(
         val response = apiService.updateMessageStatus(msgId, status)
         if (response.isSuccessful) Unit else throw Exception("Failed to update status: ${response.code()}")
     }
+
+    suspend fun sendInboundMessage(message: InboundMessageRequest): Result<AgentDecisionResponse> = runCatching {
+        val response = apiService.inboundMessage(message)
+        if (response.isSuccessful) response.body()!! else throw Exception("Failed to process inbound message: ${response.code()}")
+    }
+
+    suspend fun getScopedNotes(scope: String? = null, contactId: Long? = null, category: String? = null): Result<List<NoteResponse>> = runCatching {
+        val response = apiService.getScopedNotes(scope, contactId, category)
+        if (response.isSuccessful) response.body()!! else throw Exception("Failed to load scoped notes: ${response.code()}")
+    }
+
+    suspend fun createEventTicket(request: EventTicketRequest): Result<EventTicketResponse> = runCatching {
+        val response = apiService.createEventTicket(request)
+        if (response.isSuccessful) response.body()!! else throw Exception("Failed to create event ticket: ${response.code()}")
+    }
+
+    suspend fun prepareEventTicket(ticketId: Long): Result<EventTicketResponse> = runCatching {
+        val response = apiService.prepareEventTicket(ticketId)
+        if (response.isSuccessful) response.body()!! else throw Exception("Failed to prepare event ticket: ${response.code()}")
+    }
+
+    suspend fun approveEventTicket(ticketId: Long): Result<EventTicketResponse> = runCatching {
+        val response = apiService.approveEventTicket(ticketId)
+        if (response.isSuccessful) response.body()!! else throw Exception("Failed to approve event ticket: ${response.code()}")
+    }
+
+    suspend fun getDueEventRecipients(): Result<List<EventRecipientResponse>> = runCatching {
+        val response = apiService.getDueEventRecipients()
+        if (response.isSuccessful) response.body()!! else throw Exception("Failed to load due event recipients: ${response.code()}")
+    }
+
+    suspend fun createSendAttempt(draftId: Long, channel: String = "ANDROID_REMOTE_INPUT"): Result<SendAttemptResponse> = runCatching {
+        val response = apiService.createSendAttempt(draftId, SendAttemptRequest(channel))
+        if (response.isSuccessful) response.body()!! else throw Exception("Failed to create send attempt: ${response.code()}")
+    }
+
+    suspend fun updateSendAttempt(attemptId: Long, status: String, error: String? = null): Result<SendAttemptResponse> = runCatching {
+        val response = apiService.updateSendAttempt(attemptId, SendAttemptUpdate(status, error))
+        if (response.isSuccessful) response.body()!! else throw Exception("Failed to update send attempt: ${response.code()}")
+    }
     
     // --- Existing Sync Logic ---
     suspend fun syncContacts(): Result<List<UiContact>> {

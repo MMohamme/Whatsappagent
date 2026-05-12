@@ -6,12 +6,14 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.example.whatsappagent.AgentLogger
+import com.example.whatsappagent.BuildConfig
 import com.example.whatsappagent.WhatsAppListener
 import com.example.whatsappagent.data.AppDatabase
+import com.example.whatsappagent.data.EventRecipientEntity
 import com.example.whatsappagent.data.MessageEntity
 import com.example.whatsappagent.data.MessageStatus
 import com.example.whatsappagent.data.remote.AgentApiService
-import com.example.whatsappagent.data.remote.MessageSchema
+import com.example.whatsappagent.data.remote.InboundMessageRequest
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -21,10 +23,15 @@ import java.util.concurrent.TimeUnit
 
 class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
 
-    private val BASE_URL = "https://humming-opposite-deforest.ngrok-free.dev/"
-    
     private val apiService: AgentApiService by lazy {
         val okHttpClient = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val request = chain.request().newBuilder()
+                    .addHeader("Authorization", "Bearer ${BuildConfig.APP_API_TOKEN}")
+                    .addHeader("ngrok-skip-browser-warning", "1")
+                    .build()
+                chain.proceed(request)
+            }
             .addInterceptor(HttpLoggingInterceptor().apply {
                 level = HttpLoggingInterceptor.Level.HEADERS
             })
@@ -33,179 +40,184 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             .writeTimeout(30, TimeUnit.SECONDS)
             .build()
 
-        val retrofit = Retrofit.Builder()
-            .baseUrl(BASE_URL)
+        Retrofit.Builder()
+            .baseUrl(BuildConfig.BACKEND_BASE_URL)
             .client(okHttpClient)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
-
-        retrofit.create(AgentApiService::class.java)
+            .create(AgentApiService::class.java)
     }
 
     override suspend fun doWork(): Result {
         val db = AppDatabase.getDatabase(applicationContext)
         val dao = db.messageDao()
         val cacheDao = db.contactCacheDao()
-
         val pendingMessages = dao.getPendingMessages()
 
-        if (pendingMessages.isEmpty()) {
-            return Result.success()
-        }
-
-        AgentLogger.log(AgentLogger.LogType.INFO, "🔄 SyncWorker: ${pendingMessages.size} Nachrichten in Queue.")
-
         var allSuccessful = true
+        if (pendingMessages.isNotEmpty()) {
+            AgentLogger.log(AgentLogger.LogType.INFO, "SyncWorker: ${pendingMessages.size} Nachrichten in Queue.")
+        }
 
         for (msg in pendingMessages) {
             try {
-                // Resolve phone number if missing
                 var currentPhone = msg.phoneNumber
                 if (currentPhone.isNullOrBlank()) {
-                    val cached = cacheDao.getByName(msg.sender)
-                    if (cached != null) {
-                        currentPhone = cached.phoneNumber
-                    }
+                    currentPhone = cacheDao.getByName(msg.sender)?.phoneNumber
                 }
 
-                // 0. Check if agent is active for this contact
                 val settings = if (!currentPhone.isNullOrBlank()) {
                     db.contactSettingsDao().getContactSettingsByPhone(currentPhone)
                 } else {
                     db.contactSettingsDao().getContactSettingsByName(msg.sender)
                 }
-                
+
                 if (settings != null && !settings.isActive) {
-                    AgentLogger.log(AgentLogger.LogType.INFO, "⏭ Überspringe ${msg.sender} (Agent deaktiviert)")
-                    dao.markAsSynced(msg.customId) // Mark as "processed" so it doesn't stay in queue
+                    AgentLogger.log(AgentLogger.LogType.INFO, "Ueberspringe ${msg.sender}: lokal deaktiviert")
+                    dao.markAsSynced(msg.customId, MessageStatus.SKIPPED)
                     continue
                 }
 
-                // 1. Gesprächsverlauf aus Room holen (user + assistant, älteste zuerst)
                 val historyRaw = dao.getLastMessages(msg.sender, limit = 12).reversed()
-                val historyEntities = historyRaw.filter { it.customId != msg.customId }
-                val builtHistory = buildConversationHistory(historyEntities)
+                val historyItems = buildConversationHistory(historyRaw.filter { it.customId != msg.customId })
+                    .map { (role, text) -> mapOf("role" to role, "text" to text) }
 
-                val historyItems = builtHistory.map { (role, text) ->
-                    mapOf("role" to role, "text" to text)
-                }
-
-                // Update status to SYNCING
                 dao.updateStatus(msg.customId, MessageStatus.SYNCING)
 
-                // 2. Payload bauen
-                val schema = MessageSchema(
-                    customId = msg.customId,
-                    sender = msg.sender,
-                    text = msg.text,
-                    history = historyItems
+                val response = apiService.inboundMessage(
+                    InboundMessageRequest(
+                        customId = msg.customId,
+                        senderDisplayName = msg.sender,
+                        text = msg.text,
+                        phoneNumber = currentPhone,
+                        packageName = msg.packageName,
+                        notificationKey = msg.notificationKey,
+                        history = historyItems
+                    )
                 )
 
-                // 3. API-Call via Retrofit
-                val response = apiService.generateMessage(schema)
+                if (!response.isSuccessful) {
+                    AgentLogger.log(AgentLogger.LogType.ERROR, "HTTP ${response.code()} fuer ${msg.customId}")
+                    dao.updateStatus(msg.customId, MessageStatus.FAILED)
+                    allSuccessful = false
+                    continue
+                }
 
-                if (response.isSuccessful) {
-                    val reply = response.body()?.get("reply")
-
-                    when {
-                        !reply.isNullOrBlank() && reply != "Bereits verarbeitet" -> {
-                            // User-Nachricht als synced markieren
-                            dao.markAsSynced(msg.customId, MessageStatus.REPLY_PENDING)
-
-                            // Agent-Antwort als "assistant"-Eintrag in Room speichern
-                            val replyEntity = MessageEntity(
+                val decision = response.body()
+                val reply = decision?.reply
+                when {
+                    decision?.decision == "AUTO_SEND_ALLOWED" && !reply.isNullOrBlank() -> {
+                        dao.markAsSynced(msg.customId, MessageStatus.SEND_PENDING)
+                        dao.insertMessage(
+                            MessageEntity(
                                 customId = "reply_${msg.customId}",
                                 sender = msg.sender,
                                 text = reply,
                                 role = "assistant",
                                 isSynced = true,
-                                status = MessageStatus.REPLY_SENT,
-                                phoneNumber = currentPhone
+                                phoneNumber = currentPhone,
+                                status = MessageStatus.SEND_PENDING,
+                                backendMessageId = decision.messageId,
+                                draftId = decision.draftId
                             )
-                            dao.insertMessage(replyEntity)
-
-                            AgentLogger.log(AgentLogger.LogType.BACKEND, "✅ Synced & Reply gespeichert: ${msg.sender}")
-
-                            // Broadcast → WhatsAppListener sendet via RemoteInput
-                            val intent = Intent(WhatsAppListener.ACTION_SEND_REPLY).apply {
-                                putExtra(WhatsAppListener.EXTRA_SENDER, msg.sender)
-                                putExtra(WhatsAppListener.EXTRA_REPLY, reply)
-                                putExtra(WhatsAppListener.EXTRA_CUSTOM_ID, msg.customId)
-                            }
-                            LocalBroadcastManager.getInstance(applicationContext).sendBroadcast(intent)
+                        )
+                        val intent = Intent(WhatsAppListener.ACTION_SEND_REPLY).apply {
+                            putExtra(WhatsAppListener.EXTRA_SENDER, msg.sender)
+                            putExtra(WhatsAppListener.EXTRA_REPLY, reply)
+                            putExtra(WhatsAppListener.EXTRA_CUSTOM_ID, msg.customId)
+                            putExtra("draft_id", decision.draftId ?: -1L)
                         }
-                        reply == "Bereits verarbeitet" -> {
-                            dao.markAsSynced(msg.customId, MessageStatus.DONE)
-                            AgentLogger.log(AgentLogger.LogType.INFO, "⏭ Duplikat: ${msg.customId}")
-                        }
-                        else -> {
-                            AgentLogger.log(AgentLogger.LogType.ERROR, "⚠️ Leere Antwort vom Backend für ${msg.customId}")
-                            dao.updateStatus(msg.customId, MessageStatus.REPLY_FAILED)
-                            allSuccessful = false
-                        }
+                        LocalBroadcastManager.getInstance(applicationContext).sendBroadcast(intent)
                     }
 
-                } else {
-                    AgentLogger.log(AgentLogger.LogType.ERROR, "❌ HTTP ${response.code()} für ${msg.customId}")
-                    dao.updateStatus(msg.customId, MessageStatus.REPLY_FAILED)
-                    allSuccessful = false
-                }
+                    decision?.decision == "NEEDS_REVIEW" -> {
+                        dao.markAsSynced(msg.customId, MessageStatus.NEEDS_REVIEW)
+                        if (!reply.isNullOrBlank()) {
+                            dao.insertMessage(
+                                MessageEntity(
+                                    customId = "draft_${msg.customId}",
+                                    sender = msg.sender,
+                                    text = reply,
+                                    role = "assistant",
+                                    isSynced = true,
+                                    phoneNumber = currentPhone,
+                                    status = MessageStatus.NEEDS_REVIEW,
+                                    backendMessageId = decision.messageId,
+                                    draftId = decision.draftId
+                                )
+                            )
+                        }
+                        AgentLogger.log(AgentLogger.LogType.INFO, "Review fuer ${msg.sender}: ${decision.reason}")
+                    }
 
+                    decision?.decision == "BLOCKED" || decision?.decision == "IGNORE" -> {
+                        dao.markAsSynced(msg.customId, MessageStatus.BLOCKED)
+                        AgentLogger.log(AgentLogger.LogType.INFO, "Blockiert fuer ${msg.sender}: ${decision.reason}")
+                    }
+
+                    else -> {
+                        dao.updateStatus(msg.customId, MessageStatus.FAILED)
+                        allSuccessful = false
+                    }
+                }
             } catch (e: Exception) {
-                AgentLogger.log(AgentLogger.LogType.ERROR, "❌ Fehler im Worker (${msg.sender}): ${e.message}")
+                AgentLogger.log(AgentLogger.LogType.ERROR, "Fehler im Worker (${msg.sender}): ${e.message}")
                 allSuccessful = false
-                if (e is IOException) break // Stop loop on network issues
+                if (e is IOException) break
             }
         }
 
-        // --- Task 9: Event-Trigger-Polling ---
-        pollAndTriggerEvents()
+        pollDueEventRecipients(db)
 
         return if (allSuccessful) {
             Result.success()
+        } else if (runAttemptCount > 3) {
+            Result.failure()
         } else {
-            if (runAttemptCount > 3) {
-                AgentLogger.log(AgentLogger.LogType.ERROR, "❌ SyncWorker: Zu viele Fehlversuche ($runAttemptCount). Breche ab.")
-                Result.failure()
-            } else {
-                Result.retry()
-            }
+            Result.retry()
         }
     }
 
-    private suspend fun pollAndTriggerEvents() {
+    private suspend fun pollDueEventRecipients(db: AppDatabase) {
         try {
-            val response = apiService.getAllEvents(status = "TRIGGERED")
-            if (response.isSuccessful) {
-                val triggeredEvents = response.body() ?: emptyList()
-                if (triggeredEvents.isNotEmpty()) {
-                    AgentLogger.log(AgentLogger.LogType.INFO, "🔔 ${triggeredEvents.size} getriggerte Events gefunden.")
+            val response = apiService.getDueEventRecipients()
+            if (!response.isSuccessful) return
+            val recipients = response.body().orEmpty()
+            db.eventRecipientDao().upsertRecipients(
+                recipients.map {
+                    EventRecipientEntity(
+                        backendId = it.id,
+                        ticketId = it.ticketId,
+                        contactId = it.contactId,
+                        contactName = it.contactName ?: it.contactId.toString(),
+                        draftId = it.draftId,
+                        reply = it.draft?.reply,
+                        status = runCatching { MessageStatus.valueOf(it.status) }.getOrDefault(MessageStatus.SEND_PENDING),
+                        scheduledAtMillis = System.currentTimeMillis(),
+                        error = it.error
+                    )
                 }
-
-                triggeredEvents.forEach { event ->
-                    // Broadcast an WhatsAppListener
-                    val intent = Intent(WhatsAppListener.ACTION_SEND_REPLY).apply {
-                        putExtra(WhatsAppListener.EXTRA_SENDER, event.contactName)
-                        putExtra(WhatsAppListener.EXTRA_REPLY, event.generatedText ?: "Hallo!")
-                        putExtra("is_event", true)
-                        putExtra("event_id", event.id)
-                    }
-                    LocalBroadcastManager.getInstance(applicationContext).sendBroadcast(intent)
-
-                    // Mark as SENT im Backend
-                    apiService.updateEvent(event.id, com.example.whatsappagent.data.remote.EventUpdate(status = "SENT"))
-                    AgentLogger.log(AgentLogger.LogType.INFO, "✅ Event ${event.id} als SENT markiert.")
+            )
+            recipients.forEach { recipient ->
+                val reply = recipient.draft?.reply ?: return@forEach
+                val sender = recipient.contactName ?: return@forEach
+                val intent = Intent(WhatsAppListener.ACTION_SEND_REPLY).apply {
+                    putExtra(WhatsAppListener.EXTRA_SENDER, sender)
+                    putExtra(WhatsAppListener.EXTRA_REPLY, reply)
+                    putExtra("is_event", true)
+                    putExtra("event_recipient_id", recipient.id)
+                    putExtra("draft_id", recipient.draftId ?: -1L)
                 }
+                LocalBroadcastManager.getInstance(applicationContext).sendBroadcast(intent)
             }
         } catch (e: Exception) {
-            AgentLogger.log(AgentLogger.LogType.ERROR, "❌ Fehler beim Event-Polling: ${e.message}")
+            AgentLogger.log(AgentLogger.LogType.ERROR, "Fehler beim EventRecipient-Polling: ${e.message}")
         }
     }
 
     private fun buildConversationHistory(messages: List<MessageEntity>): List<Pair<String, String>> {
         val result = mutableListOf<Pair<String, String>>()
         var lastRole = ""
-
         for (msg in messages.sortedBy { it.timestamp }) {
             if (msg.role == lastRole) {
                 val lastEntry = result.lastOrNull()

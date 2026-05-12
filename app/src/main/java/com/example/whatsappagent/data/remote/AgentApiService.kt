@@ -23,6 +23,9 @@ interface AgentApiService {
     // --- Message Generation ---
     @POST("generate")
     suspend fun generateMessage(@Body message: MessageSchema): Response<Map<String, String>>
+
+    @POST("messages/inbound")
+    suspend fun inboundMessage(@Body message: InboundMessageRequest): Response<AgentDecisionResponse>
     
     @PATCH("messages/{msg_id}")
     suspend fun updateMessageStatus(
@@ -32,6 +35,52 @@ interface AgentApiService {
     
     @GET("health")
     suspend fun healthCheck(): Response<Map<String, String>>
+
+    // --- v3 Notes ---
+    @GET("notes")
+    suspend fun getScopedNotes(
+        @Query("scope") scope: String? = null,
+        @Query("contact_id") contactId: Long? = null,
+        @Query("category") category: String? = null,
+        @Query("active_only") activeOnly: Boolean = false
+    ): Response<List<NoteResponse>>
+
+    @POST("notes")
+    suspend fun createScopedNote(@Body note: NoteRequest): Response<NoteResponse>
+
+    @PATCH("notes/{id}")
+    suspend fun updateScopedNote(@Path("id") id: Long, @Body note: NoteRequest): Response<NoteResponse>
+
+    @DELETE("notes/{id}")
+    suspend fun deleteScopedNote(@Path("id") id: Long): Response<Map<String, String>>
+
+    // --- v3 Event tickets ---
+    @GET("event-tickets")
+    suspend fun getEventTickets(@Query("status") status: String? = null): Response<List<EventTicketResponse>>
+
+    @POST("event-tickets")
+    suspend fun createEventTicket(@Body event: EventTicketRequest): Response<EventTicketResponse>
+
+    @GET("event-tickets/{id}")
+    suspend fun getEventTicket(@Path("id") id: Long): Response<EventTicketResponse>
+
+    @POST("event-tickets/{id}/prepare")
+    suspend fun prepareEventTicket(@Path("id") id: Long): Response<EventTicketResponse>
+
+    @POST("event-tickets/{id}/approve")
+    suspend fun approveEventTicket(@Path("id") id: Long): Response<EventTicketResponse>
+
+    @POST("event-tickets/{id}/cancel")
+    suspend fun cancelEventTicket(@Path("id") id: Long): Response<EventTicketResponse>
+
+    @GET("event-recipients/due")
+    suspend fun getDueEventRecipients(): Response<List<EventRecipientResponse>>
+
+    @POST("drafts/{id}/send-attempts")
+    suspend fun createSendAttempt(@Path("id") draftId: Long, @Body request: SendAttemptRequest): Response<SendAttemptResponse>
+
+    @PATCH("send-attempts/{id}")
+    suspend fun updateSendAttempt(@Path("id") attemptId: Long, @Body update: SendAttemptUpdate): Response<SendAttemptResponse>
     
     // --- Contacts ---
     @GET("contacts")
