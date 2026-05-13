@@ -81,6 +81,9 @@ interface AgentApiService {
 
     @PATCH("send-attempts/{id}")
     suspend fun updateSendAttempt(@Path("id") attemptId: Long, @Body update: SendAttemptUpdate): Response<SendAttemptResponse>
+
+    @PATCH("drafts/{id}/decision")
+    suspend fun updateDraftDecision(@Path("id") draftId: Long, @Body update: DraftDecisionUpdate): Response<QueueMessageResponse>
     
     // --- Contacts ---
     @GET("contacts")
@@ -122,21 +125,9 @@ interface AgentApiService {
     suspend fun deleteNote(@Path("name") name: String, @Path("id") id: Int): Response<Map<String, String>>
 
     // --- Events ---
-    @GET("contacts/{name}/events")
-    suspend fun getContactEvents(@Path("name") name: String): Response<List<EventResponse>>
-
     @GET("events")
     suspend fun getAllEvents(@Query("status") status: String? = null): Response<List<EventResponse>>
 
-    @POST("contacts/{name}/events")
-    suspend fun createEvent(@Path("name") name: String, @Body event: EventCreate): Response<EventResponse>
-
     @PATCH("events/{id}")
     suspend fun updateEvent(@Path("id") id: Int, @Body update: EventUpdate): Response<EventResponse>
-
-    @DELETE("events/{id}")
-    suspend fun deleteEvent(@Path("id") id: Int): Response<Map<String, String>>
-
-    @POST("events/{id}/trigger")
-    suspend fun triggerEvent(@Path("id") id: Int): Response<EventTriggerResponse>
 }

@@ -3,18 +3,21 @@ package com.example.whatsappagent.ui.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.whatsappagent.data.*
+import com.example.whatsappagent.data.AppDatabase
 import com.example.whatsappagent.data.remote.AgentRepository
-import com.example.whatsappagent.data.remote.EventCreate
 import com.example.whatsappagent.data.remote.EventResponse
+import com.example.whatsappagent.data.remote.EventTicketRequest
+import com.example.whatsappagent.data.remote.EventTicketResponse
 import com.example.whatsappagent.data.remote.EventUpdate
 import com.example.whatsappagent.ui.model.ContactCategory
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * ViewModel for Events screen
- * Manages events via the backend API
+ * ViewModel for the Events screen.
+ * Category and single-contact planning now use v3 EventTickets.
  */
 class EventsViewModel(
     private val database: AppDatabase,
@@ -24,6 +27,9 @@ class EventsViewModel(
 
     private val _events = MutableStateFlow<List<EventResponse>>(emptyList())
     val events: StateFlow<List<EventResponse>> = _events.asStateFlow()
+
+    private val _tickets = MutableStateFlow<List<EventTicketResponse>>(emptyList())
+    val tickets: StateFlow<List<EventTicketResponse>> = _tickets.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -41,11 +47,12 @@ class EventsViewModel(
     fun loadAll(status: String? = null) {
         viewModelScope.launch {
             _isLoading.value = true
-            repository.getAllEvents(status).onSuccess {
-                _events.value = it
+            repository.getEventTickets(status).onSuccess {
+                _tickets.value = it
             }.onFailure {
-                // Log error
+                _successMessage.value = "Event-Tickets konnten nicht geladen werden."
             }
+            _events.value = emptyList()
             _isLoading.value = false
         }
     }
@@ -53,25 +60,41 @@ class EventsViewModel(
     fun addEvent(
         contactName: String,
         title: String,
-        scheduledAt: String, // ISO 8601
+        scheduledAt: String,
         description: String? = null,
         eventType: String = "CUSTOM"
     ) {
         viewModelScope.launch {
             _isLoading.value = true
-            val eventCreate = EventCreate(
-                title = title,
-                eventType = eventType,
-                description = description,
-                scheduledAt = scheduledAt
-            )
-            repository.createEvent(contactName, eventCreate).onSuccess {
-                _successMessage.value = "Event '$title' für $contactName erstellt."
-                loadAll()
-                _showAddEventDialog.value = false
-            }.onFailure {
-                // Handle error
-            }
+            repository.getBackendContacts()
+                .mapCatching { contacts ->
+                    contacts.firstOrNull {
+                        it.contactName.equals(contactName, ignoreCase = true) ||
+                            it.displayName?.equals(contactName, ignoreCase = true) == true
+                    }?.id ?: throw IllegalStateException("Contact not found")
+                }
+                .mapCatching { contactId ->
+                    repository.createEventTicket(
+                        EventTicketRequest(
+                            title = title,
+                            targetType = "CONTACT",
+                            targetContactId = contactId,
+                            scheduledAt = scheduledAt,
+                            baseText = description
+                        )
+                    ).getOrThrow()
+                }
+                .mapCatching { ticket ->
+                    repository.prepareEventTicket(ticket.id).getOrThrow()
+                }
+                .onSuccess {
+                    _successMessage.value = "Event-Ticket '$title' fuer $contactName vorbereitet."
+                    loadAll()
+                    _showAddEventDialog.value = false
+                }
+                .onFailure {
+                    _successMessage.value = "Event-Ticket konnte nicht erstellt werden."
+                }
             _isLoading.value = false
         }
     }
@@ -90,8 +113,6 @@ class EventsViewModel(
             _isLoading.value = true
             repository.triggerEvent(eventId).onSuccess {
                 loadAll()
-            }.onFailure {
-                // Handle error
             }
             _isLoading.value = false
         }
@@ -115,48 +136,65 @@ class EventsViewModel(
     ) {
         viewModelScope.launch {
             _isLoading.value = true
-            // 1. Get all active contacts in this category
-            val contacts = database.contactSettingsDao().getSettingsByCategory(category.name)
-                .filter { it.isActive }
-            
-            var successCount = 0
-            var errorCount = 0
-
-            // 2. Create an event for each contact with rate limiting handling
-            contacts.forEach { contact ->
-                var attempt = 0
-                var success = false
-                
-                while (attempt < 3 && !success) {
-                    val result = repository.createEvent(contact.contactName, EventCreate(
-                        title = title,
-                        eventType = "PROACTIVE",
-                        description = description,
-                        scheduledAt = scheduledAt
-                    ))
-
-                    if (result.isSuccess) {
-                        success = true
-                        successCount++
-                    } else {
-                        val error = result.exceptionOrNull()?.message ?: ""
-                        if (error.contains("429")) {
-                            attempt++
-                            kotlinx.coroutines.delay(1000L * attempt) // Backoff
-                        } else {
-                            attempt = 3 // Give up on other errors
-                        }
-                    }
+            repository.createEventTicket(
+                EventTicketRequest(
+                    title = title,
+                    targetType = "CATEGORY",
+                    targetCategory = category.name,
+                    scheduledAt = scheduledAt,
+                    baseText = description
+                )
+            )
+                .mapCatching { ticket ->
+                    repository.prepareEventTicket(ticket.id).getOrThrow()
                 }
-                if (!success) errorCount++
-                
-                // Small delay between contacts to avoid hammering
-                kotlinx.coroutines.delay(300L)
+                .onSuccess { ticket ->
+                    _successMessage.value = "Event-Ticket '${ticket.title}' vorbereitet (${ticket.recipientsCount} Empfaenger)."
+                    loadAll()
+                    _showAddEventDialog.value = false
+                }
+                .onFailure {
+                    _successMessage.value = "Event-Ticket konnte nicht erstellt werden."
+                }
+            _isLoading.value = false
+        }
+    }
+
+    fun prepareTicket(ticketId: Long) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            repository.prepareEventTicket(ticketId).onSuccess {
+                _successMessage.value = "Event-Ticket vorbereitet (${it.recipientsCount} Empfaenger)."
+                loadAll()
+            }.onFailure {
+                _successMessage.value = "Event-Ticket konnte nicht vorbereitet werden."
             }
-            
-            _successMessage.value = "$successCount Events geplant" + (if (errorCount > 0) ", $errorCount Fehler" else "")
-            loadAll()
-            _showAddEventDialog.value = false
+            _isLoading.value = false
+        }
+    }
+
+    fun approveTicket(ticketId: Long) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            repository.approveEventTicket(ticketId).onSuccess {
+                _successMessage.value = "Event-Ticket freigegeben."
+                loadAll()
+            }.onFailure {
+                _successMessage.value = "Event-Ticket konnte nicht freigegeben werden."
+            }
+            _isLoading.value = false
+        }
+    }
+
+    fun cancelTicket(ticketId: Long) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            repository.cancelEventTicket(ticketId).onSuccess {
+                _successMessage.value = "Event-Ticket storniert."
+                loadAll()
+            }.onFailure {
+                _successMessage.value = "Event-Ticket konnte nicht storniert werden."
+            }
             _isLoading.value = false
         }
     }

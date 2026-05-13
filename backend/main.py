@@ -11,6 +11,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 from google import genai
 from pydantic import BaseModel, Field
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 try:
@@ -30,13 +31,13 @@ try:
         MessageStatus,
         Note,
         NoteScope,
+        RelationType,
         RiskLevel,
         SendAttempt,
         SendChannel,
         SessionLocal,
         init_db,
     )
-    from .migrate import seed_database
 except ImportError:
     from database import (
         AgentDecision,
@@ -54,19 +55,17 @@ except ImportError:
         MessageStatus,
         Note,
         NoteScope,
+        RelationType,
         RiskLevel,
         SendAttempt,
         SendChannel,
         SessionLocal,
         init_db,
     )
-    from migrate import seed_database
 
 
 load_dotenv()
 init_db()
-if os.getenv("SEED_ON_START", "1") == "1":
-    seed_database()
 
 app = FastAPI(title="WA Agent Backend", version="3.0.0")
 APP_API_TOKEN = os.getenv("APP_API_TOKEN", "dev-token-change-me")
@@ -245,16 +244,36 @@ def note_to_dict(note: Note) -> Dict[str, Any]:
 
 
 def draft_to_dict(draft: Draft) -> Dict[str, Any]:
+    contact = draft.message.contact if draft.message else None
+    source_status = (
+        draft.send_attempts[-1].status
+        if draft.send_attempts
+        else draft.message.status
+        if draft.message
+        else draft.decision
+    )
+    created_at = draft.created_at.isoformat() if draft.created_at else None
     return {
         "id": draft.id,
         "message_id": draft.message_id,
         "event_recipient_id": draft.event_recipient_id,
+        "custom_id": draft.message.custom_id if draft.message else None,
+        "message_custom_id": draft.message.custom_id if draft.message else None,
+        "notification_key": draft.message.notification_key if draft.message else None,
+        "package_name": draft.message.package_name if draft.message else None,
         "reply": draft.reply_text,
         "decision": draft.decision,
         "risk_level": draft.risk_level,
         "reason": draft.reason,
         "category": draft.category,
         "recommended_delay_ms": draft.recommended_delay_ms,
+        "created_at": created_at,
+        "contact_id": contact.id if contact else None,
+        "contact_name": contact.display_name if contact else "Event",
+        "msg_id": str(draft.id),
+        "content": draft.reply_text,
+        "timestamp": created_at,
+        "status": source_status,
     }
 
 
@@ -779,6 +798,16 @@ def event_reply_for(contact: Contact, ticket: EventTicket) -> str:
     return f"Alles Gute zu {ticket.title}, {contact.display_name}! Liebe Gruesse."
 
 
+def event_recipient_auto_send_allowed(contact: Contact) -> tuple[bool, str]:
+    if not contact.is_active:
+        return False, "Contact is inactive"
+    if contact.relation_type in {RelationType.WORK.value, RelationType.UNKNOWN.value}:
+        return False, "Work or unknown contacts require review"
+    if contact.auto_mode not in {AutoMode.AUTO_LOW_RISK.value, AutoMode.AUTO_TRUSTED.value}:
+        return False, "Contact auto mode is not enabled"
+    return True, "Approved event recipient"
+
+
 @app.post("/event-tickets", dependencies=[Depends(require_auth)])
 def create_event_ticket(req: EventTicketRequest, db: Session = Depends(get_db)):
     ticket = EventTicket(
@@ -860,10 +889,13 @@ def approve_event_ticket(ticket_id: int, db: Session = Depends(get_db)):
     if not ticket:
         raise HTTPException(status_code=404, detail="Event ticket not found")
     for recipient in ticket.recipients:
-        recipient.status = MessageStatus.SEND_PENDING.value
+        allowed, reason = event_recipient_auto_send_allowed(recipient.contact)
+        recipient.status = MessageStatus.SEND_PENDING.value if allowed else MessageStatus.NEEDS_REVIEW.value
+        recipient.error = None if allowed else reason
         if recipient.draft:
-            recipient.draft.decision = AgentDecision.AUTO_SEND_ALLOWED.value
-            recipient.draft.recommended_delay_ms = 0
+            recipient.draft.decision = AgentDecision.AUTO_SEND_ALLOWED.value if allowed else AgentDecision.NEEDS_REVIEW.value
+            recipient.draft.reason = reason
+            recipient.draft.recommended_delay_ms = 0 if allowed else recipient.draft.recommended_delay_ms
     ticket.status = EventTicketStatus.APPROVED.value
     audit(db, "event_ticket_approved", "event_ticket", ticket.id)
     db.commit()
@@ -931,7 +963,7 @@ def update_send_attempt(attempt_id: int, req: SendAttemptUpdate, db: Session = D
         statuses = [r.status for r in ticket.recipients]
         if statuses and all(s == MessageStatus.SENT.value for s in statuses):
             ticket.status = EventTicketStatus.SENT.value
-        elif any(s == MessageStatus.FAILED.value for s in statuses):
+        elif any(s == MessageStatus.FAILED.value or s.startswith("FAILED_") for s in statuses):
             ticket.status = EventTicketStatus.PARTIAL_FAILED.value
         elif any(s == MessageStatus.SENDING.value for s in statuses):
             ticket.status = EventTicketStatus.SENDING.value
@@ -949,14 +981,43 @@ def update_draft_decision(draft_id: int, req: DraftDecisionUpdate, db: Session =
         draft.reply_text = req.reply_text
     if req.reason is not None:
         draft.reason = req.reason
+    status_for_decision = {
+        AgentDecision.AUTO_SEND_ALLOWED.value: MessageStatus.SEND_PENDING.value,
+        AgentDecision.NEEDS_REVIEW.value: MessageStatus.NEEDS_REVIEW.value,
+        AgentDecision.DRAFT_ONLY.value: MessageStatus.NEEDS_REVIEW.value,
+        AgentDecision.BLOCKED.value: MessageStatus.BLOCKED.value,
+        AgentDecision.IGNORE.value: MessageStatus.SKIPPED.value,
+    }.get(draft.decision, MessageStatus.NEEDS_REVIEW.value)
+    if draft.message:
+        draft.message.status = status_for_decision
+    if draft.event_recipient_id:
+        recipient = db.get(EventRecipient, draft.event_recipient_id)
+        if recipient:
+            recipient.status = status_for_decision
+            recipient.error = None if status_for_decision == MessageStatus.SEND_PENDING.value else draft.reason
     db.commit()
     db.refresh(draft)
     return draft_to_dict(draft)
 
 
 @app.get("/queue", dependencies=[Depends(require_auth)])
-def queue(limit: int = Query(100, ge=1, le=500), db: Session = Depends(get_db)):
-    drafts = db.query(Draft).order_by(Draft.created_at.desc()).limit(limit).all()
+def queue(status: Optional[str] = None, limit: int = Query(100, ge=1, le=500), db: Session = Depends(get_db)):
+    query = db.query(Draft).order_by(Draft.created_at.desc())
+    if status:
+        normalized = status.upper()
+        if normalized in {AgentDecision.NEEDS_REVIEW.value, AgentDecision.AUTO_SEND_ALLOWED.value, AgentDecision.BLOCKED.value}:
+            query = query.filter(Draft.decision == normalized)
+        elif normalized == MessageStatus.SEND_PENDING.value:
+            query = query.filter(
+                or_(
+                    Draft.decision == AgentDecision.AUTO_SEND_ALLOWED.value,
+                    Draft.message.has(Message.status == MessageStatus.SEND_PENDING.value),
+                    Draft.send_attempts.any(SendAttempt.status == MessageStatus.SEND_PENDING.value),
+                )
+            )
+        elif normalized in {MessageStatus.SENT.value, MessageStatus.FAILED.value, MessageStatus.SENDING.value}:
+            query = query.filter(Draft.send_attempts.any(SendAttempt.status.like(f"{normalized}%")))
+    drafts = query.limit(limit).all()
     return [draft_to_dict(d) for d in drafts]
 
 
@@ -1048,8 +1109,21 @@ def legacy_update_event(event_id: int, update: Dict[str, Any], db: Session = Dep
 
 @app.get("/stats", dependencies=[Depends(require_auth)])
 def stats(db: Session = Depends(get_db)):
+    total_messages = db.query(Message).count()
+    pending = db.query(Draft).filter(Draft.decision == AgentDecision.NEEDS_REVIEW.value).count()
+    failed = db.query(SendAttempt).filter(SendAttempt.status.like("FAILED%")).count()
+    sent = db.query(SendAttempt).filter(SendAttempt.status == MessageStatus.SENT.value).count()
+    due = db.query(EventRecipient).filter(EventRecipient.status == MessageStatus.SEND_PENDING.value).count()
     return {
         "contacts": {"total": db.query(Contact).count(), "active": db.query(Contact).filter(Contact.is_active == True).count()},
-        "messages": {"total": db.query(Message).count(), "needs_review": db.query(Draft).filter(Draft.decision == AgentDecision.NEEDS_REVIEW.value).count()},
-        "events": {"tickets": db.query(EventTicket).count(), "due": db.query(EventRecipient).filter(EventRecipient.status == MessageStatus.SEND_PENDING.value).count()},
+        "messages": {
+            "total": total_messages,
+            "total_replies": sent,
+            "pending_replies": pending,
+            "failed_replies": failed,
+            "needs_review": pending,
+        },
+        "events": {"pending": due, "tickets": db.query(EventTicket).count(), "due": due},
+        "chart_daily": [{"day": utcnow().date().isoformat(), "count": total_messages}],
+        "chart_categories": [],
     }

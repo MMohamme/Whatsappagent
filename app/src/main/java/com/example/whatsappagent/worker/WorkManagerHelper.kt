@@ -17,6 +17,7 @@ object WorkManagerHelper {
     private const val SYNC_WORK_NAME = "WhatsAppSyncWork"
     private const val CONTACT_INDEX_WORK_NAME = "WhatsAppContactIndexWork"
     private const val RETRY_WORK_NAME = "WhatsAppRetryWork"
+    private const val EVENT_RECIPIENT_POLL_WORK_NAME = "WhatsAppEventRecipientPollWork"
 
     /**
      * Reiht den SyncWorker ein. Er startet sofort, sobald eine Netzwerkverbindung besteht.
@@ -59,10 +60,35 @@ object WorkManagerHelper {
     }
 
     /**
+     * Polls approved due event recipients even when no new inbound WhatsApp message arrives.
+     */
+    fun scheduleEventRecipientPolling(context: Context) {
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+
+        val pollRequest = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES)
+            .setConstraints(constraints)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 1, TimeUnit.MINUTES)
+            .build()
+
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            EVENT_RECIPIENT_POLL_WORK_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            pollRequest
+        )
+    }
+
+    /**
      * Reiht den ContactIndexerWorker ein.
      */
     fun triggerContactIndexing(context: Context) {
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+
         val contactIndexRequest = OneTimeWorkRequestBuilder<ContactIndexerWorker>()
+            .setConstraints(constraints)
             .build()
 
         WorkManager.getInstance(context).enqueueUniqueWork(

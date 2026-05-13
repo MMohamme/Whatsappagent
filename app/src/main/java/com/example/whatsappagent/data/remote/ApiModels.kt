@@ -61,28 +61,61 @@ data class ContactResponse(
 
 data class ContactCreate(
     @SerializedName("contact_name") val contactName: String,
+    @SerializedName("display_name") val displayName: String? = null,
+    @SerializedName("phone_number") val phoneNumber: String? = null,
     @SerializedName("relation_type") val relationType: String,
     @SerializedName("specific_relation") val specificRelation: String? = null,
     @SerializedName("preferred_lang") val preferredLang: String? = null,
-    @SerializedName("behavior_rules") val behaviorRules: String? = null
+    @SerializedName("behavior_rules") val behaviorRules: String? = null,
+    @SerializedName("auto_mode") val autoMode: String? = null,
+    @SerializedName("categories") val categories: List<String>? = null
 )
 
 data class ContactUpdate(
+    @SerializedName("display_name") val displayName: String? = null,
+    @SerializedName("contact_name") val contactName: String? = null,
+    @SerializedName("phone_number") val phoneNumber: String? = null,
+    @SerializedName("relation_type") val relationType: String? = null,
     @SerializedName("specific_relation") val specificRelation: String? = null,
     @SerializedName("preferred_lang") val preferredLang: String? = null,
     @SerializedName("behavior_rules") val behaviorRules: String? = null,
+    @SerializedName("auto_mode") val autoMode: String? = null,
+    @SerializedName("categories") val categories: List<String>? = null,
     @SerializedName("active") val active: Boolean? = null
 )
 
 // --- QUEUE ---
 data class QueueMessageResponse(
+    @SerializedName("id") val id: Long? = null,
+    @SerializedName("message_id") val messageId: Long? = null,
+    @SerializedName("event_recipient_id") val eventRecipientId: Long? = null,
+    @SerializedName("custom_id") val customId: String? = null,
+    @SerializedName("message_custom_id") val messageCustomId: String? = null,
+    @SerializedName("notification_key") val notificationKey: String? = null,
     @SerializedName("msg_id") val msgId: String,
     @SerializedName("contact_name") val contactName: String,
     @SerializedName("content") val content: String,
+    @SerializedName("reply") val reply: String? = null,
     @SerializedName("timestamp") val timestamp: String?,
     @SerializedName("status") val status: String,
-    @SerializedName("category") val category: String?
-)
+    @SerializedName("decision") val decision: String? = null,
+    @SerializedName("risk_level") val riskLevel: String? = null,
+    @SerializedName("reason") val reason: String? = null,
+    @SerializedName("category") val category: String?,
+    @SerializedName("recommended_delay_ms") val recommendedDelayMs: Long = 0
+) {
+    val draftId: Long?
+        get() = id ?: msgId.toLongOrNull()
+
+    val draftText: String
+        get() = reply ?: content
+
+    val displayStatus: String
+        get() = status.ifBlank { decision ?: "NEEDS_REVIEW" }
+
+    val isReviewable: Boolean
+        get() = decision == "NEEDS_REVIEW" || status == "NEEDS_REVIEW"
+}
 
 // --- NOTES ---
 data class NoteResponse(
@@ -268,4 +301,10 @@ data class SendAttemptResponse(
     @SerializedName("status") val status: String,
     @SerializedName("channel") val channel: String? = null,
     @SerializedName("sent_at") val sentAt: String? = null
+)
+
+data class DraftDecisionUpdate(
+    @SerializedName("decision") val decision: String,
+    @SerializedName("reply_text") val replyText: String? = null,
+    @SerializedName("reason") val reason: String? = null
 )

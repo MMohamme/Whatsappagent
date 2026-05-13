@@ -286,7 +286,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db(reset: bool | None = None):
     if reset is None:
-        reset = os.getenv("RESET_DB_ON_START", "1") == "1"
+        reset = os.getenv("RESET_DB_ON_START", "0") == "1"
     if reset:
         Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)

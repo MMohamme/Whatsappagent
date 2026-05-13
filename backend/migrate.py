@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 from typing import Iterable
 
 try:
@@ -249,21 +250,30 @@ def seed_contacts(db, seeds: Iterable[dict]):
     for data in seeds:
         contact = db.query(Contact).filter(Contact.display_name == data["display_name"]).first()
         if not contact:
-            contact = Contact(display_name=data["display_name"])
+            contact = Contact(
+                display_name=data["display_name"],
+                phone_number=data.get("phone_number"),
+                relation_type=data.get("relation_type", RelationType.UNKNOWN.value),
+                specific_relation=data.get("specific_relation"),
+                preferred_lang=data.get("preferred_lang", "Deutsch"),
+                auto_mode=data.get("auto_mode", AutoMode.REVIEW.value),
+                is_active=True,
+            )
             db.add(contact)
             db.flush()
-        contact.phone_number = data.get("phone_number")
-        contact.relation_type = data.get("relation_type", RelationType.UNKNOWN.value)
-        contact.specific_relation = data.get("specific_relation")
-        contact.preferred_lang = data.get("preferred_lang", "Deutsch")
-        contact.auto_mode = data.get("auto_mode", AutoMode.REVIEW.value)
-        contact.is_active = True
-        contact.categories = [get_or_create_category(db, c) for c in data.get("categories", [])]
+
+        if data.get("phone_number") and not contact.phone_number:
+            contact.phone_number = data["phone_number"]
+        if not contact.categories:
+            contact.categories = [get_or_create_category(db, c) for c in data.get("categories", [])]
         if not contact.rules:
             contact.rules = ContactRule(contact_id=contact.id)
-        contact.rules.style = data.get("style")
-        contact.rules.allowed_topics = data.get("allowed_topics")
-        contact.rules.blocked_topics = data.get("blocked_topics")
+        if not contact.rules.style:
+            contact.rules.style = data.get("style")
+        if not contact.rules.allowed_topics:
+            contact.rules.allowed_topics = data.get("allowed_topics")
+        if not contact.rules.blocked_topics:
+            contact.rules.blocked_topics = data.get("blocked_topics")
 
 
 def seed_notes(db, seeds: Iterable[dict]):
@@ -323,6 +333,14 @@ def seed_database():
 
 
 if __name__ == "__main__":
-    init_db(reset=True)
+    parser = argparse.ArgumentParser(description="Seed or reset the WhatsApp Agent v3 database.")
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Drop and recreate the database schema before seeding. Omit for the normal one-time idempotent seed.",
+    )
+    args = parser.parse_args()
+
+    init_db(reset=args.reset)
     seed_database()
-    print("Database reset and seeded.")
+    print("Database seeded." if not args.reset else "Database reset and seeded.")

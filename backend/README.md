@@ -15,6 +15,7 @@ Useful scripts:
 
 ```powershell
 python -m backend.migrate
+python -m backend.migrate --reset
 ```
 
 Environment:
@@ -47,5 +48,6 @@ Authorization: Bearer <APP_API_TOKEN>
 Default local behavior:
 
 - SQLite DB path: project-root `whatsapp_agent.db`
-- `RESET_DB_ON_START=1` recreates the v3 schema on backend startup
-- `python -m backend.migrate` seeds contacts, notes and a sample event ticket
+- Backend startup does not seed data.
+- `python -m backend.migrate` idempotently seeds contacts, notes and a sample event ticket.
+- `python -m backend.migrate --reset` recreates the v3 schema first, then seeds.

@@ -39,9 +39,8 @@ class AgentRepository(
     // --- Conflict-Fix: phoneNumber bei Kontakt-Sync mitschreiben ---
     suspend fun syncContactPhoneNumber(contactName: String, phoneNumber: String): Result<ContactResponse> =
         runCatching { 
-            // Backend doesn't support phoneNumber yet, just updating local cache for now
             database.contactCacheDao().insertContact(com.example.whatsappagent.data.ContactCacheEntity(phoneNumber, contactName))
-            val response = apiService.updateContact(contactName, ContactUpdate(active = true)) // Dummy update to verify connection
+            val response = apiService.updateContact(contactName, ContactUpdate(phoneNumber = phoneNumber))
             if (response.isSuccessful) response.body()!! else throw Exception("Failed to sync: ${response.code()}")
         }
 
@@ -49,6 +48,11 @@ class AgentRepository(
     suspend fun getStats(): Result<StatsResponse> = runCatching { 
         val response = apiService.getStats()
         if (response.isSuccessful) response.body()!! else throw Exception("Failed to get stats: ${response.code()}")
+    }
+
+    suspend fun getBackendContacts(): Result<List<ContactResponse>> = runCatching {
+        val response = apiService.getContacts()
+        if (response.isSuccessful) response.body() ?: emptyList() else throw Exception("Failed to get contacts: ${response.code()}")
     }
 
     // --- Queue ---
@@ -85,19 +89,9 @@ class AgentRepository(
     }
 
     // --- Events ---
-    suspend fun getContactEvents(contactName: String): Result<List<EventResponse>> = runCatching { 
-        val response = apiService.getContactEvents(contactName)
-        if (response.isSuccessful) response.body()!! else throw Exception("Failed to get events: ${response.code()}")
-    }
-
     suspend fun getAllEvents(status: String? = null): Result<List<EventResponse>> = runCatching { 
         val response = apiService.getAllEvents(status)
         if (response.isSuccessful) response.body()!! else throw Exception("Failed to get all events: ${response.code()}")
-    }
-
-    suspend fun createEvent(contactName: String, event: EventCreate): Result<EventResponse> = runCatching { 
-        val response = apiService.createEvent(contactName, event)
-        if (response.isSuccessful) response.body()!! else throw Exception("Failed to create event: ${response.code()}")
     }
 
     suspend fun updateEvent(eventId: Int, update: EventUpdate): Result<EventResponse> = runCatching { 
@@ -105,14 +99,14 @@ class AgentRepository(
         if (response.isSuccessful) response.body()!! else throw Exception("Failed to update event: ${response.code()}")
     }
 
-    suspend fun deleteEvent(eventId: Int): Result<Unit> = runCatching { 
-        val response = apiService.deleteEvent(eventId)
-        if (response.isSuccessful) Unit else throw Exception("Failed to delete event: ${response.code()}")
+    suspend fun deleteEvent(eventId: Int): Result<Unit> = runCatching {
+        cancelEventTicket(eventId.toLong()).getOrThrow()
+        Unit
     }
 
-    suspend fun triggerEvent(eventId: Int): Result<EventTriggerResponse> = runCatching { 
-        val response = apiService.triggerEvent(eventId)
-        if (response.isSuccessful) response.body()!! else throw Exception("Failed to trigger event: ${response.code()}")
+    suspend fun triggerEvent(eventId: Int): Result<Unit> = runCatching {
+        approveEventTicket(eventId.toLong()).getOrThrow()
+        Unit
     }
 
     suspend fun updateMessageStatus(msgId: String, status: String): Result<Unit> = runCatching {
@@ -135,6 +129,11 @@ class AgentRepository(
         if (response.isSuccessful) response.body()!! else throw Exception("Failed to create event ticket: ${response.code()}")
     }
 
+    suspend fun getEventTickets(status: String? = null): Result<List<EventTicketResponse>> = runCatching {
+        val response = apiService.getEventTickets(status)
+        if (response.isSuccessful) response.body()!! else throw Exception("Failed to load event tickets: ${response.code()}")
+    }
+
     suspend fun prepareEventTicket(ticketId: Long): Result<EventTicketResponse> = runCatching {
         val response = apiService.prepareEventTicket(ticketId)
         if (response.isSuccessful) response.body()!! else throw Exception("Failed to prepare event ticket: ${response.code()}")
@@ -143,6 +142,11 @@ class AgentRepository(
     suspend fun approveEventTicket(ticketId: Long): Result<EventTicketResponse> = runCatching {
         val response = apiService.approveEventTicket(ticketId)
         if (response.isSuccessful) response.body()!! else throw Exception("Failed to approve event ticket: ${response.code()}")
+    }
+
+    suspend fun cancelEventTicket(ticketId: Long): Result<EventTicketResponse> = runCatching {
+        val response = apiService.cancelEventTicket(ticketId)
+        if (response.isSuccessful) response.body()!! else throw Exception("Failed to cancel event ticket: ${response.code()}")
     }
 
     suspend fun getDueEventRecipients(): Result<List<EventRecipientResponse>> = runCatching {
@@ -158,6 +162,19 @@ class AgentRepository(
     suspend fun updateSendAttempt(attemptId: Long, status: String, error: String? = null): Result<SendAttemptResponse> = runCatching {
         val response = apiService.updateSendAttempt(attemptId, SendAttemptUpdate(status, error))
         if (response.isSuccessful) response.body()!! else throw Exception("Failed to update send attempt: ${response.code()}")
+    }
+
+    suspend fun updateDraftDecision(
+        draftId: Long,
+        decision: String,
+        reason: String? = null,
+        replyText: String? = null
+    ): Result<QueueMessageResponse> = runCatching {
+        val response = apiService.updateDraftDecision(
+            draftId,
+            DraftDecisionUpdate(decision = decision, replyText = replyText, reason = reason)
+        )
+        if (response.isSuccessful) response.body()!! else throw Exception("Failed to update draft decision: ${response.code()}")
     }
     
     // --- Existing Sync Logic ---
@@ -232,10 +249,13 @@ class AgentRepository(
         return try {
             val createRequest = ContactCreate(
                 contactName = contact.name,
+                displayName = contact.name,
+                phoneNumber = contact.phoneNumber,
                 relationType = contact.category.name,
                 specificRelation = contact.relation,
                 preferredLang = contact.lang,
-                behaviorRules = contact.style
+                behaviorRules = contact.style,
+                categories = listOf(contact.category.name)
             )
             
             val response = apiService.createContact(createRequest)
@@ -273,6 +293,9 @@ class AgentRepository(
     suspend fun updateContact(contact: UiContact): Result<UiContact> {
         return try {
             val updateRequest = ContactUpdate(
+                displayName = contact.name,
+                phoneNumber = contact.phoneNumber,
+                relationType = contact.category.name,
                 specificRelation = contact.relation,
                 preferredLang = contact.lang,
                 behaviorRules = contact.style,

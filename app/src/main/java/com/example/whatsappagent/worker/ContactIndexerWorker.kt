@@ -2,8 +2,10 @@ package com.example.whatsappagent.worker
 
 import android.content.ContentResolver
 import android.content.Context
+import android.content.pm.PackageManager
 import android.database.Cursor
 import android.provider.ContactsContract
+import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.example.whatsappagent.AgentLogger
@@ -48,6 +50,10 @@ class ContactIndexerWorker(context: Context, params: WorkerParameters) : Corouti
         AgentLogger.log(AgentLogger.LogType.INFO, "🔍 Starte Kontakt-Indizierung...")
 
         try {
+            if (ContextCompat.checkSelfPermission(applicationContext, android.Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+                AgentLogger.log(AgentLogger.LogType.INFO, "Kontakt-Indizierung uebersprungen: READ_CONTACTS fehlt")
+                return Result.success()
+            }
             val contacts = fetchWhatsAppContacts(applicationContext.contentResolver)
             if (contacts.isNotEmpty()) {
                 dao.insertContacts(contacts)
@@ -74,7 +80,8 @@ class ContactIndexerWorker(context: Context, params: WorkerParameters) : Corouti
     }
 
     private fun fetchWhatsAppContacts(resolver: ContentResolver): List<ContactCacheEntity> {
-        val contacts = mutableListOf<ContactCacheEntity>()
+        val phoneContacts = fetchPhoneContacts(resolver)
+        val contacts = linkedMapOf<String, ContactCacheEntity>()
         
         val projection = arrayOf(
             ContactsContract.Data.DISPLAY_NAME,
@@ -106,18 +113,53 @@ class ContactIndexerWorker(context: Context, params: WorkerParameters) : Corouti
                 val jid = it.getString(jidIndex) ?: ""
                 val data3 = it.getString(data3Index) ?: ""
                 
-                var phoneNumber = jid.split("@")[0]
+                var phoneNumber = normalizePhone(jid.split("@")[0])
                 
-                if (phoneNumber.isBlank() || !phoneNumber.all { c -> c.isDigit() }) {
-                    phoneNumber = data3.filter { c -> c.isDigit() }
+                if (phoneNumber.isBlank()) {
+                    phoneNumber = normalizePhone(data3)
+                }
+                if (phoneNumber.isBlank()) {
+                    phoneNumber = phoneContacts[normalizeName(name)].orEmpty()
                 }
 
                 if (phoneNumber.isNotBlank()) {
-                    contacts.add(ContactCacheEntity(phoneNumber, name))
+                    contacts[phoneNumber] = ContactCacheEntity(phoneNumber, name)
                 }
             }
         }
         
+        return contacts.values.toList()
+    }
+
+    private fun fetchPhoneContacts(resolver: ContentResolver): Map<String, String> {
+        val contacts = linkedMapOf<String, String>()
+        val projection = arrayOf(
+            ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+            ContactsContract.CommonDataKinds.Phone.NUMBER
+        )
+        resolver.query(
+            ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+            projection,
+            null,
+            null,
+            null
+        )?.use { cursor ->
+            val nameIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+            val numberIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+            while (cursor.moveToNext()) {
+                val name = cursor.getString(nameIndex) ?: continue
+                val number = normalizePhone(cursor.getString(numberIndex) ?: "")
+                if (number.isNotBlank()) {
+                    contacts.putIfAbsent(normalizeName(name), number)
+                }
+            }
+        }
         return contacts
     }
+
+    private fun normalizePhone(raw: String): String =
+        raw.filter { it.isDigit() }
+
+    private fun normalizeName(raw: String): String =
+        raw.trim().lowercase().replace(Regex("\\s+"), " ")
 }

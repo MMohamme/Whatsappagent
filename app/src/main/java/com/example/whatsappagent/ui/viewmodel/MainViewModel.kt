@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.whatsappagent.AgentService
 import com.example.whatsappagent.AgentLogger
+import com.example.whatsappagent.AgentSafetySettings
 import com.example.whatsappagent.data.AppDatabase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -48,6 +49,18 @@ class MainViewModel(
 
     private val _isContactsEnabled = MutableStateFlow(false)
     val isContactsEnabled: StateFlow<Boolean> = _isContactsEnabled.asStateFlow()
+
+    private val safetyPrefs = application.getSharedPreferences(AgentSafetySettings.PREFS_NAME, Context.MODE_PRIVATE)
+
+    private val _isAutoSendPaused = MutableStateFlow(
+        safetyPrefs.getBoolean(AgentSafetySettings.PREF_AUTO_SEND_PAUSED, false)
+    )
+    val isAutoSendPaused: StateFlow<Boolean> = _isAutoSendPaused.asStateFlow()
+
+    private val _isAccessibilityFallbackEnabled = MutableStateFlow(
+        safetyPrefs.getBoolean(AgentSafetySettings.PREF_ACCESSIBILITY_FALLBACK_ENABLED, false)
+    )
+    val isAccessibilityFallbackEnabled: StateFlow<Boolean> = _isAccessibilityFallbackEnabled.asStateFlow()
 
     init {
         // Initialize with current backend status
@@ -97,6 +110,24 @@ class MainViewModel(
             AgentTheme.LIGHT -> AgentTheme.AMOLED
             AgentTheme.AMOLED -> AgentTheme.DARK
         }
+    }
+
+    fun setAutoSendPaused(paused: Boolean) {
+        safetyPrefs.edit().putBoolean(AgentSafetySettings.PREF_AUTO_SEND_PAUSED, paused).apply()
+        _isAutoSendPaused.value = paused
+        AgentLogger.log(
+            AgentLogger.LogType.INFO,
+            if (paused) "Auto-Send pausiert" else "Auto-Send wieder aktiv"
+        )
+    }
+
+    fun setAccessibilityFallbackEnabled(enabled: Boolean) {
+        safetyPrefs.edit().putBoolean(AgentSafetySettings.PREF_ACCESSIBILITY_FALLBACK_ENABLED, enabled).apply()
+        _isAccessibilityFallbackEnabled.value = enabled
+        AgentLogger.log(
+            AgentLogger.LogType.INFO,
+            if (enabled) "Accessibility-Fallback freigegeben" else "Accessibility-Fallback deaktiviert"
+        )
     }
 
     fun addLogEntry(entry: String) {

@@ -29,7 +29,7 @@ import java.util.*
 /**
  * QueueScreen updated to use backend models (QueueMessageResponse)
  */
-enum class QueueStatusUI { ALL, CAPTURED, REPLY_PENDING, REPLY_FAILED }
+enum class QueueStatusUI { ALL, NEEDS_REVIEW, SEND_PENDING, SENDING, SENT, FAILED, BLOCKED }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -39,6 +39,8 @@ fun QueueScreenNew(
     isLoading: Boolean,
     onFilterChange: (String?) -> Unit,
     onRetryMessage: (String) -> Unit = {},
+    onApproveDraft: (String) -> Unit = {},
+    onBlockDraft: (String) -> Unit = {},
     onRetryAll: () -> Unit = {},
     onTriggerSync: () -> Unit = {},
     onTriggerIndex: () -> Unit = {},
@@ -49,10 +51,10 @@ fun QueueScreenNew(
         // Summary row (Stats from the current list)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             listOf(
-                Triple("Captured", "CAPTURED", C.yellow),
-                Triple("Pending",  "REPLY_PENDING", C.accent),
-                Triple("Sent",     "DONE", C.green),
-                Triple("Failed",   "REPLY_FAILED", C.red),
+                Triple("Review", "NEEDS_REVIEW", C.yellow),
+                Triple("Pending",  "SEND_PENDING", C.accent),
+                Triple("Sent",     "SENT", C.green),
+                Triple("Failed",   "FAILED", C.red),
             ).forEach { (label, status, color) ->
                 AgentCard(
                     C = C,
@@ -87,7 +89,7 @@ fun QueueScreenNew(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                listOf(null, "CAPTURED", "REPLY_PENDING", "REPLY_FAILED").forEach { status ->
+                listOf(null, "NEEDS_REVIEW", "SEND_PENDING", "SENDING", "SENT", "FAILED", "BLOCKED").forEach { status ->
                     val isSelected = currentFilter == status
                     val label = status ?: "ALL"
                     
@@ -112,12 +114,6 @@ fun QueueScreenNew(
             }
             
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (queue.any { it.status == "REPLY_FAILED" || it.status == "CAPTURED" }) {
-                    TextButton(onClick = onRetryAll) {
-                        Text("Alle erneut", color = C.red, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-
                 IconButton(onClick = onTriggerSync) {
                     Icon(Icons.Default.Refresh, contentDescription = "Sync", tint = C.accent)
                 }
@@ -153,7 +149,7 @@ fun QueueScreenNew(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(queue, key = { it.msgId }) { item ->
-                    QueueItemRow(item, C, onRetryMessage)
+                    QueueItemRow(item, C, onRetryMessage, onApproveDraft, onBlockDraft)
                 }
             }
         }
@@ -161,12 +157,19 @@ fun QueueScreenNew(
 }
 
 @Composable
-private fun QueueItemRow(item: QueueMessageResponse, C: AgentColors, onRetry: (String) -> Unit) {
+private fun QueueItemRow(
+    item: QueueMessageResponse,
+    C: AgentColors,
+    onRetry: (String) -> Unit,
+    onApproveDraft: (String) -> Unit,
+    onBlockDraft: (String) -> Unit,
+) {
     val statusColor = when (item.status) {
-        "CAPTURED" -> C.yellow
-        "SYNCING", "REPLY_PENDING" -> C.accent
-        "DONE", "REPLY_SENT" -> C.green
-        "REPLY_FAILED", "SYNC_FAILED" -> C.red
+        "NEEDS_REVIEW" -> C.yellow
+        "SEND_PENDING", "SENDING" -> C.accent
+        "SENT" -> C.green
+        "FAILED", "FAILED_NO_CHANNEL", "FAILED_ACCESSIBILITY" -> C.red
+        "BLOCKED" -> C.red.copy(alpha = 0.75f)
         else -> C.textMuted
     }
 
@@ -225,20 +228,24 @@ private fun QueueItemRow(item: QueueMessageResponse, C: AgentColors, onRetry: (S
             )
         }
 
-        // Action button
-        if (item.status == "CAPTURED" || item.status == "REPLY_FAILED") {
+        if (item.status == "NEEDS_REVIEW") {
             Spacer(modifier = Modifier.width(8.dp))
-            IconButton(
-                onClick = { onRetry(item.msgId) },
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(
-                    Icons.Default.Refresh,
-                    contentDescription = "Retry",
-                    tint = C.accent,
-                    modifier = Modifier.size(16.dp)
-                )
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                TextButton(onClick = { onBlockDraft(item.msgId) }) {
+                    Text("Block", color = C.red, fontSize = 11.sp)
+                }
+                Button(
+                    onClick = { onApproveDraft(item.msgId) },
+                    colors = ButtonDefaults.buttonColors(containerColor = C.green),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                    modifier = Modifier.height(30.dp)
+                ) {
+                    Text("Approve", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
             }
+        } else {
+            AgentPill(item.status, statusColor)
         }
     }
 }

@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.whatsappagent.data.remote.EventResponse
+import com.example.whatsappagent.data.remote.EventTicketResponse
 import com.example.whatsappagent.ui.components.*
 import com.example.whatsappagent.ui.model.ContactCategory
 import com.example.whatsappagent.ui.model.UiContact
@@ -109,10 +110,14 @@ private fun DateTimePicker(
 @Composable
 fun EventsScreen(
     events: List<EventResponse>,
+    tickets: List<EventTicketResponse> = emptyList(),
     contacts: List<UiContact>,
     isLoading: Boolean = false,
     onAddEvent: (String, String, String, String?) -> Unit, // contact, title, date, desc
     onBroadcastEvent: (ContactCategory, String, String, String?) -> Unit,
+    onPrepareTicket: (Long) -> Unit = {},
+    onApproveTicket: (Long) -> Unit = {},
+    onCancelTicket: (Long) -> Unit = {},
     onTriggerNow: (Int) -> Unit,
     onDeleteEvent: (Int) -> Unit,
     onRefresh: () -> Unit = {},
@@ -149,7 +154,7 @@ fun EventsScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                SectionLabel("Geplante Events (${events.size})", C)
+                SectionLabel("Event Control Center", C)
                 TextButton(onClick = onRefresh) {
                     Text("Refresh", color = C.accent, fontSize = 12.sp)
                 }
@@ -162,7 +167,7 @@ fun EventsScreen(
                 Spacer(Modifier.height(12.dp))
             }
 
-            if (events.isEmpty()) {
+            if (events.isEmpty() && tickets.isEmpty()) {
                 EmptyState(
                     title = "Keine Events geplant",
                     description = "Geplante Nachrichten oder Erinnerungen erscheinen hier.",
@@ -172,6 +177,26 @@ fun EventsScreen(
                 )
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (tickets.isNotEmpty()) {
+                        item {
+                            SectionLabel("Tickets (${tickets.size})", C)
+                        }
+                        items(tickets, key = { "ticket-${it.id}" }) { ticket ->
+                            EventTicketItem(
+                                ticket = ticket,
+                                onPrepare = { onPrepareTicket(ticket.id) },
+                                onApprove = { onApproveTicket(ticket.id) },
+                                onCancel = { onCancelTicket(ticket.id) },
+                                C = C
+                            )
+                        }
+                    }
+                    if (events.isNotEmpty()) {
+                        item {
+                            Spacer(Modifier.height(4.dp))
+                            SectionLabel("Legacy Events (${events.size})", C)
+                        }
+                    }
                     items(events, key = { it.id }) { event ->
                         EventItem(
                             event = event,
@@ -199,6 +224,121 @@ fun EventsScreen(
             onDismiss = { showAddDialog = false },
             C = C
         )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun EventTicketItem(
+    ticket: EventTicketResponse,
+    onPrepare: () -> Unit,
+    onApprove: () -> Unit,
+    onCancel: () -> Unit,
+    C: AgentColors
+) {
+    val statusColor = when (ticket.status) {
+        "DRAFT" -> C.textMuted
+        "PREPARED" -> C.yellow
+        "APPROVED", "SENDING" -> C.accent
+        "SENT", "DONE" -> C.green
+        "CANCELLED" -> C.red
+        else -> C.textMuted
+    }
+
+    AgentCard(C = C, padding = 16) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(ticket.title, fontWeight = FontWeight.ExtraBold, color = C.textPrimary, fontSize = 15.sp)
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "${ticket.targetType}: ${ticket.targetCategory ?: ticket.targetContactId ?: "Unbekannt"}",
+                        color = C.textSecondary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                AgentBadge(ticket.status, statusColor)
+            }
+
+            if (!ticket.baseText.isNullOrBlank()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(C.inputBg)
+                        .padding(10.dp)
+                ) {
+                    Text(ticket.baseText, color = C.textSecondary, fontSize = 12.sp, lineHeight = 18.sp)
+                }
+            }
+
+            if (ticket.recipients.isNotEmpty()) {
+                androidx.compose.foundation.layout.FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    ticket.recipients.take(6).forEach { recipient ->
+                        val recipientColor = when (recipient.status) {
+                            "SEND_PENDING", "SENT" -> C.green
+                            "NEEDS_REVIEW" -> C.yellow
+                            "FAILED", "BLOCKED" -> C.red
+                            else -> C.textMuted
+                        }
+                        AgentPill(
+                            "${recipient.contactName ?: recipient.contactId}: ${recipient.status}",
+                            recipientColor
+                        )
+                    }
+                    if (ticket.recipients.size > 6) {
+                        Text("...", color = C.textMuted, fontSize = 10.sp)
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = formatIsoDate(ticket.scheduledAt),
+                        color = C.textMuted,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "${ticket.recipientsCount} Empfänger",
+                        color = C.textSecondary,
+                        fontSize = 11.sp
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (ticket.status == "DRAFT") {
+                        TextButton(onClick = onPrepare) {
+                            Text("Prepare", color = C.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    if (ticket.status == "PREPARED") {
+                        TextButton(onClick = onApprove) {
+                            Text("Approve", color = C.green, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    if (ticket.status != "CANCELLED" && ticket.status != "DONE" && ticket.status != "SENT") {
+                        TextButton(onClick = onCancel) {
+                            Text("Cancel", color = C.red, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

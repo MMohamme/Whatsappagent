@@ -1,10 +1,8 @@
-package com.example.whatsappagent
+﻿package com.example.whatsappagent
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.example.whatsappagent.data.AppDatabase
@@ -15,7 +13,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.security.MessageDigest
-import kotlin.random.Random
 
 class AutoReplyService : AccessibilityService() {
 
@@ -40,7 +37,7 @@ class AutoReplyService : AccessibilityService() {
             notificationTimeout = 100
         }
         serviceInfo = info
-        AgentLogger.log(AgentLogger.LogType.INFO, "AutoReplyService aktiv ✅")
+        AgentLogger.log(AgentLogger.LogType.INFO, "AutoReplyService aktiv âœ…")
     }
 
     override fun onDestroy() {
@@ -138,7 +135,7 @@ class AutoReplyService : AccessibilityService() {
             val recent = db.messageDao().getLastMessages(sender, 1)
             if (recent.isNotEmpty() && recent[0].text == text) return@launch
 
-            AgentLogger.log(AgentLogger.LogType.MESSAGE, "🔍 Scraped von $sender: $text")
+            AgentLogger.log(AgentLogger.LogType.MESSAGE, "ðŸ” Scraped von $sender: $text")
 
             val timestamp = System.currentTimeMillis()
             val customId = generateHash("$sender$text$timestamp")
@@ -164,7 +161,7 @@ class AutoReplyService : AccessibilityService() {
     override fun onInterrupt() {}
 
     // =========================
-    // ÖFFENTLICHE METHODE — gibt true zurück wenn erfolgreich
+    // Ã–FFENTLICHE METHODE â€” gibt true zurÃ¼ck wenn erfolgreich
     // Wird von WhatsAppListener mit Retry aufgerufen
     // =========================
     fun tryReply(text: String): Boolean {
@@ -172,10 +169,14 @@ class AutoReplyService : AccessibilityService() {
     }
 
     /**
-     * Tries to reply to a specific contact. If targetContact is provided, 
-     * it will try to find and open the chat first.
+     * Tries to reply only when the active WhatsApp chat already matches the target contact.
      */
     fun tryReply(targetContact: String?, text: String): Boolean {
+        if (!isAccessibilityFallbackAllowed()) {
+            AgentLogger.log(AgentLogger.LogType.INFO, "Accessibility-Fallback nicht freigegeben")
+            return false
+        }
+
         val root = rootInActiveWindow ?: run {
             AgentLogger.log(AgentLogger.LogType.INFO, "Kein aktives Fenster")
             return false
@@ -185,14 +186,13 @@ class AutoReplyService : AccessibilityService() {
             // If targetContact is provided, check if we are already in the right chat
             if (targetContact != null) {
                 val currentChat = findChatName(root)
-                if (currentChat != targetContact) {
-                    AgentLogger.log(AgentLogger.LogType.INFO, "Nicht im Chat mit $targetContact. Suche...")
-                    openChatByName(root, targetContact)
-                    return false // Caller should retry
+                if (!isSameChatName(currentChat, targetContact)) {
+                    AgentLogger.log(AgentLogger.LogType.ERROR, "Accessibility blockiert: aktiver Chat ist '$currentChat', erwartet '$targetContact'")
+                    return false
                 }
             }
 
-            // Prüfen ob wir wirklich in WhatsApp sind
+            // PrÃ¼fen ob wir wirklich in WhatsApp sind
             val packageName = root.packageName?.toString()
             if (packageName != "com.whatsapp.w4b" && packageName != "com.whatsapp") {
                 AgentLogger.log(AgentLogger.LogType.INFO, "Falsches Fenster: $packageName")
@@ -211,140 +211,56 @@ class AutoReplyService : AccessibilityService() {
             // Release wake lock as we are now interacting
             DeviceControl.releaseWakeLock()
 
-            // Kurz warten dann Text einfügen
-            Handler(Looper.getMainLooper()).postDelayed({
-                insertTextAndSend(maybeAddTypo(text))
-            }, Random.nextLong(1500, 3000))
-
-            return true
+            // Kurz warten dann Text einfÃ¼gen
+            return insertTextAndSend(text, targetContact)
         } finally {
             root.recycle()
         }
     }
 
-    private fun openChatByName(root: AccessibilityNodeInfo, name: String) {
-        // 1. Find and click search button
-        val searchIds = arrayOf(
-            "com.whatsapp:id/menuitem_search",
-            "com.whatsapp.w4b:id/menuitem_search"
-        )
-        var searchBtn: AccessibilityNodeInfo? = null
-        for (id in searchIds) {
-            val nodes = root.findAccessibilityNodeInfosByViewId(id)
-            if (!nodes.isNullOrEmpty()) {
-                searchBtn = nodes[0]
-                break
-            }
-        }
-        
-        if (searchBtn == null) {
-            searchBtn = findNodeByDescription(root, listOf("Suche", "Search"))
-        }
-
-        if (searchBtn != null) {
-            searchBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            
-            // 2. Wait and type name
-            Handler(Looper.getMainLooper()).postDelayed({
-                val rootSearch = rootInActiveWindow ?: return@postDelayed
-                val searchInput = findSearchInput(rootSearch)
-                if (searchInput != null) {
-                    val args = Bundle().apply {
-                        putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, name)
-                    }
-                    searchInput.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-                    
-                    // 3. Wait and click first result
-                    Handler(Looper.getMainLooper()).postDelayed({
-                        val rootResults = rootInActiveWindow ?: return@postDelayed
-                        val firstResult = findFirstSearchResult(rootResults, name)
-                        firstResult?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                        rootResults.recycle()
-                    }, 1000)
-                }
-                rootSearch.recycle()
-            }, 1000)
-        } else {
-            AgentLogger.log(AgentLogger.LogType.ERROR, "❌ Suche-Button nicht gefunden")
-        }
-    }
-
-    private fun findSearchInput(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        val ids = arrayOf(
-            "com.whatsapp:id/search_input",
-            "com.whatsapp.w4b:id/search_input",
-            "com.whatsapp:id/search_src_text",
-            "com.whatsapp.w4b:id/search_src_text"
-        )
-        for (id in ids) {
-            val nodes = root.findAccessibilityNodeInfosByViewId(id)
-            if (!nodes.isNullOrEmpty()) return nodes[0]
-        }
-        return findEditableNode(root)
-    }
-
-    private fun findFirstSearchResult(root: AccessibilityNodeInfo, name: String): AccessibilityNodeInfo? {
-        // Try to find a node with the contact name text
-        val nodes = root.findAccessibilityNodeInfosByText(name)
-        if (!nodes.isNullOrEmpty()) {
-            // Find the first clickable parent or the node itself
-            var current: AccessibilityNodeInfo? = nodes[0]
-            while (current != null) {
-                if (current.isClickable) return current
-                current = current.parent
-            }
-        }
-        return null
-    }
-
     // =========================
-    // TEXT EINFÜGEN + SENDEN
+    // TEXT EINFÃœGEN + SENDEN
     // =========================
-    private fun insertTextAndSend(text: String) {
-        val root = rootInActiveWindow ?: return
-        val inputField = findInputField(root) ?: run { root.recycle(); return }
+    private fun insertTextAndSend(text: String, targetContact: String?): Boolean {
+        val root = rootInActiveWindow ?: return false
+        if (targetContact != null && !isSameChatName(findChatName(root), targetContact)) {
+            AgentLogger.log(AgentLogger.LogType.ERROR, "Accessibility blockiert: Chat wechselte vor dem Senden")
+            root.recycle()
+            return false
+        }
+
+        val inputField = findInputField(root) ?: run { root.recycle(); return false }
 
         val args = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }
         val inserted = inputField.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-        root.recycle()
 
         if (!inserted) {
-            AgentLogger.log(AgentLogger.LogType.ERROR, "❌ Text einfügen fehlgeschlagen")
-            return
+            AgentLogger.log(AgentLogger.LogType.ERROR, "âŒ Text einfÃ¼gen fehlgeschlagen")
+            root.recycle()
+            return false
         }
 
         // Senden Button klicken
-        Handler(Looper.getMainLooper()).postDelayed({
-            val rootNew = rootInActiveWindow ?: return@postDelayed
-            val sendBtn = findSendButton(rootNew)
-            if (sendBtn != null) {
-                sendBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            } else {
-                AgentLogger.log(AgentLogger.LogType.ERROR, "❌ Senden-Button nicht gefunden")
-            }
-            rootNew.recycle()
-        }, 500)
+        val sendBtn = findSendButton(root)
+        if (sendBtn == null) {
+            AgentLogger.log(AgentLogger.LogType.ERROR, "Senden-Button nicht gefunden")
+            root.recycle()
+            return false
+        }
+
+        val sent = sendBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        root.recycle()
+        return sent
     }
 
-    // =========================
-    // TIPPFEHLER SIMULATION (20% Chance)
-    // =========================
-    private fun maybeAddTypo(text: String): String {
-        if (Random.nextInt(100) >= 20 || text.length < 5) return text
-        val words = text.split(" ").toMutableList()
-        if (words.isEmpty()) return text
-        val wordIndex = Random.nextInt(words.size)
-        val word = words[wordIndex]
-        if (word.length < 3) return text
-        val charIndex = Random.nextInt(word.length - 1)
-        val typo = word.toCharArray().also {
-            val tmp = it[charIndex]; it[charIndex] = it[charIndex + 1]; it[charIndex + 1] = tmp
-        }.concatToString()
-        words[wordIndex] = typo
-        return "${words.joinToString(" ")} $text"
-    }
+    private fun isAccessibilityFallbackAllowed(): Boolean =
+        getSharedPreferences(AgentSafetySettings.PREFS_NAME, MODE_PRIVATE)
+            .getBoolean(AgentSafetySettings.PREF_ACCESSIBILITY_FALLBACK_ENABLED, false)
+
+    private fun isSameChatName(actual: String?, expected: String): Boolean =
+        actual?.trim()?.equals(expected.trim(), ignoreCase = true) == true
 
     // =========================
     // NODE FINDER

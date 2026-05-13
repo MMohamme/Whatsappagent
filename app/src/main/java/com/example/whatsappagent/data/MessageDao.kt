@@ -24,7 +24,7 @@ interface MessageDao {
     @Query("SELECT * FROM messages_queue WHERE status = :status")
     suspend fun getMessagesByStatus(status: MessageStatus): List<MessageEntity>
 
-    @Query("SELECT * FROM messages_queue WHERE status = 'REPLY_FAILED'")
+    @Query("SELECT * FROM messages_queue WHERE status = 'FAILED'")
     fun getFailedRepliesFlow(): Flow<List<MessageEntity>>
 
     /**
@@ -52,7 +52,7 @@ interface MessageDao {
     fun getSendersFlow(): Flow<List<String>>
 
     // Statistics queries
-    @Query("SELECT COUNT(*) FROM messages_queue WHERE status = 'REPLY_FAILED' AND timestamp > :since")
+    @Query("SELECT COUNT(*) FROM messages_queue WHERE status = 'FAILED' AND timestamp > :since")
     fun countErrorsSince(since: Long): Flow<Int>
 
     @Query("SELECT COUNT(*) FROM messages_queue WHERE role = 'assistant' AND timestamp > :since")

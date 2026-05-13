@@ -4,6 +4,7 @@ import android.app.Application
 import com.example.whatsappagent.data.AppDatabase
 import com.example.whatsappagent.data.remote.AgentApiService
 import com.example.whatsappagent.data.remote.AgentRepository
+import com.example.whatsappagent.worker.WorkManagerHelper
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -48,5 +49,6 @@ class AgentApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        WorkManagerHelper.scheduleEventRecipientPolling(this)
     }
 }

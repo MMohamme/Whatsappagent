@@ -5,11 +5,25 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
-val backendBaseUrl = providers.gradleProperty("BACKEND_BASE_URL")
-    .orElse("https://humming-opposite-deforest.ngrok-free.dev/")
+fun dotenvValue(key: String): String? {
+    val envFile = rootProject.file(".env")
+    if (!envFile.exists()) return null
+    return envFile.readLines()
+        .map { it.trim() }
+        .firstOrNull { it.isNotEmpty() && !it.startsWith("#") && it.substringBefore("=") == key }
+        ?.substringAfter("=", "")
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+}
+
+val rawBackendBaseUrl = providers.gradleProperty("BACKEND_BASE_URL")
+    .orElse(providers.environmentVariable("BACKEND_BASE_URL"))
+    .orElse(dotenvValue("BACKEND_BASE_URL") ?: "https://humming-opposite-deforest.ngrok-free.dev/")
     .get()
+val backendBaseUrl = rawBackendBaseUrl.trim().trimEnd('/') + "/"
 val appApiToken = providers.gradleProperty("APP_API_TOKEN")
-    .orElse("dev-token-change-me")
+    .orElse(providers.environmentVariable("APP_API_TOKEN"))
+    .orElse(dotenvValue("APP_API_TOKEN") ?: "dev-token-change-me")
     .get()
 
 android {

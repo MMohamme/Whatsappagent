@@ -6,6 +6,7 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.example.whatsappagent.AgentLogger
+import com.example.whatsappagent.AgentSafetySettings
 import com.example.whatsappagent.BuildConfig
 import com.example.whatsappagent.WhatsAppListener
 import com.example.whatsappagent.data.AppDatabase
@@ -52,6 +53,9 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         val db = AppDatabase.getDatabase(applicationContext)
         val dao = db.messageDao()
         val cacheDao = db.contactCacheDao()
+        val autoSendPaused = applicationContext
+            .getSharedPreferences(AgentSafetySettings.PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(AgentSafetySettings.PREF_AUTO_SEND_PAUSED, false)
         val pendingMessages = dao.getPendingMessages()
 
         var allSuccessful = true
@@ -106,7 +110,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                 val decision = response.body()
                 val reply = decision?.reply
                 when {
-                    decision?.decision == "AUTO_SEND_ALLOWED" && !reply.isNullOrBlank() -> {
+                    decision?.decision == "AUTO_SEND_ALLOWED" && !reply.isNullOrBlank() && !autoSendPaused -> {
                         dao.markAsSynced(msg.customId, MessageStatus.SEND_PENDING)
                         dao.insertMessage(
                             MessageEntity(
@@ -125,9 +129,27 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                             putExtra(WhatsAppListener.EXTRA_SENDER, msg.sender)
                             putExtra(WhatsAppListener.EXTRA_REPLY, reply)
                             putExtra(WhatsAppListener.EXTRA_CUSTOM_ID, msg.customId)
-                            putExtra("draft_id", decision.draftId ?: -1L)
+                            putExtra(WhatsAppListener.EXTRA_DRAFT_ID, decision.draftId ?: -1L)
                         }
                         LocalBroadcastManager.getInstance(applicationContext).sendBroadcast(intent)
+                    }
+
+                    decision?.decision == "AUTO_SEND_ALLOWED" && !reply.isNullOrBlank() && autoSendPaused -> {
+                        dao.markAsSynced(msg.customId, MessageStatus.NEEDS_REVIEW)
+                        dao.insertMessage(
+                            MessageEntity(
+                                customId = "draft_${msg.customId}",
+                                sender = msg.sender,
+                                text = reply,
+                                role = "assistant",
+                                isSynced = true,
+                                phoneNumber = currentPhone,
+                                status = MessageStatus.NEEDS_REVIEW,
+                                backendMessageId = decision.messageId,
+                                draftId = decision.draftId
+                            )
+                        )
+                        AgentLogger.log(AgentLogger.LogType.INFO, "Auto-Send pausiert: Draft fuer ${msg.sender} in Review")
                     }
 
                     decision?.decision == "NEEDS_REVIEW" -> {
@@ -198,6 +220,13 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                     )
                 }
             )
+            val autoSendPaused = applicationContext
+                .getSharedPreferences(AgentSafetySettings.PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(AgentSafetySettings.PREF_AUTO_SEND_PAUSED, false)
+            if (autoSendPaused) {
+                AgentLogger.log(AgentLogger.LogType.INFO, "Auto-Send pausiert: EventRecipients werden nicht gesendet")
+                return
+            }
             recipients.forEach { recipient ->
                 val reply = recipient.draft?.reply ?: return@forEach
                 val sender = recipient.contactName ?: return@forEach
@@ -206,7 +235,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                     putExtra(WhatsAppListener.EXTRA_REPLY, reply)
                     putExtra("is_event", true)
                     putExtra("event_recipient_id", recipient.id)
-                    putExtra("draft_id", recipient.draftId ?: -1L)
+                    putExtra(WhatsAppListener.EXTRA_DRAFT_ID, recipient.draftId ?: -1L)
                 }
                 LocalBroadcastManager.getInstance(applicationContext).sendBroadcast(intent)
             }
