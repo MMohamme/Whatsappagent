@@ -1,10 +1,29 @@
 # WA Agent Pro Control Center
 
+![License](https://img.shields.io/badge/license-Apache--2.0-blue)
+![Platform](https://img.shields.io/badge/platform-Android-green)
+![Backend](https://img.shields.io/badge/backend-FastAPI-teal)
+![Status](https://img.shields.io/badge/status-active%20prototype-orange)
+
 WA Agent Pro Control Center is an Android-first control center for a personal WhatsApp automation agent. The long-term idea is ambitious: an agent that can understand private messages, remember context, adapt to the relationship with the sender, write in the owner's personal style, and eventually answer across text and voice.
 
 Today, the project is a working prototype foundation: Android captures WhatsApp notifications, stores and syncs messages, a FastAPI backend creates decisions and drafts, and the app gives the operator a serious Review Queue, contact rules, notes, event tickets, logs, and safety controls.
 
 This repository is not just a chat bot experiment. It is a step-by-step attempt to build a controllable personal communication agent.
+
+> Disclaimer: this is an independent research/prototype project. It is not affiliated with, endorsed by, or officially supported by WhatsApp, Meta, Google, Gemini, ElevenLabs, or any other platform provider. Android notification, RemoteInput, and Accessibility behavior can change by device, OS version, app version, and policy.
+
+## Screenshots
+
+The current UI is a dense, phone-first control center. Contact names in screenshots may be redacted.
+
+| Dashboard | Contacts | Event form |
+| --- | --- | --- |
+| ![Dashboard health overview](docs/assets/screenshots/dashboard-health-overview.jpeg) | ![Contacts control list](docs/assets/screenshots/contacts-control-list.png) | ![Event creation form](docs/assets/screenshots/event-create-form.jpeg) |
+
+| Contact form | Events empty state | Logs |
+| --- | --- | --- |
+| ![Contact creation form](docs/assets/screenshots/contact-create-form.jpeg) | ![Events empty state](docs/assets/screenshots/events-empty-state.jpeg) | ![Live logs feed](docs/assets/screenshots/logs-live-feed.jpeg) |
 
 ## Motivation
 
@@ -13,7 +32,7 @@ The original motivation was to build a fully autonomous WhatsApp agent that can 
 - detect and filter WhatsApp and WhatsApp Business messages;
 - identify the sender and react differently for family, work, friends, and unknown contacts;
 - understand and remember conversation context;
-- generate replies in a personal style, including Englisch, German and Syrian Arabic;
+- generate replies in a personal style, including English, German, and Syrian Arabic;
 - use realistic behavior such as delays, small imperfections, and a recognizable personal voice;
 - reply automatically when allowed, ideally even when the screen is locked;
 - later understand voice messages, transcribe them, answer them, and send voice replies.
@@ -40,6 +59,17 @@ Voice is part of the future plan:
 The professional product path is different from the personal Android prototype. For real users and production reliability, the preferred long-term channel is the official WhatsApp Business Platform / Cloud API. The Android automation path is useful for a personal companion, but it remains best-effort and device-dependent.
 
 See [VISION.md](VISION.md) for the planning roadmap.
+
+## Roadmap
+
+The next work is tracked in [VISION.md](VISION.md). Current priority themes:
+
+- stabilize Android notification capture, RemoteInput sending, retry, and failure reporting;
+- strengthen policy and review gates before increasing autonomy;
+- improve contact personality, notes, language, and memory behavior;
+- prototype voice-message transcription and reviewed voice replies;
+- make event tickets and scheduled communication more reliable;
+- prepare a future channel abstraction for WhatsApp Cloud API, Telegram, and email.
 
 ## What We Have Achieved So Far
 
@@ -307,6 +337,8 @@ Manual scenarios worth checking before a release:
 - [Project deep dive](docs/project_specification_deep_dive.md)
 - [Agent handbook](docs/agent_handbook.md)
 - [Historical technical vision notes](docs/vision.md)
+- [Contributing guide](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
 
 The current FigJam architecture board created from the Mermaid diagrams:
 
@@ -324,6 +356,12 @@ This project handles private messaging data and can act in a user's personal com
 - Do not use the system to impersonate someone in contexts where disclosure, consent, or legal compliance is required.
 
 The product direction is controlled autonomy: the agent should become more capable over time, but the operator must always be able to see, pause, review, and override it.
+
+## Suggested GitHub Topics
+
+Use these topics in the GitHub repository About panel:
+
+`android`, `jetpack-compose`, `fastapi`, `whatsapp`, `automation`, `ai-agent`, `personal-assistant`, `workmanager`, `room-database`, `notification-listener`, `android-accessibility`, `llm`, `gemini`, `python`, `kotlin`
 
 ## Development Status
 
