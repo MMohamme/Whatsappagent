@@ -23,3 +23,4 @@ local.properties
 crash_log.txt
 logs/
 backups/
+whatsapp_agent.db 
