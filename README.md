@@ -13,7 +13,7 @@ The original motivation was to build a fully autonomous WhatsApp agent that can 
 - detect and filter WhatsApp and WhatsApp Business messages;
 - identify the sender and react differently for family, work, friends, and unknown contacts;
 - understand and remember conversation context;
-- generate replies in a personal style, including German and Syrian Arabic;
+- generate replies in a personal style, including Englisch, German and Syrian Arabic;
 - use realistic behavior such as delays, small imperfections, and a recognizable personal voice;
 - reply automatically when allowed, ideally even when the screen is locked;
 - later understand voice messages, transcribe them, answer them, and send voice replies.
