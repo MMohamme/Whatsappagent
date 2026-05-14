@@ -8,6 +8,8 @@ Canva blueprint:
 - 2026-05-13 scalable UI draft prepared in Canva transaction `2793860767077113002`.
   The draft updates the board toward restored modules, component library, and operational-intelligence cues.
   Canva requires explicit user approval before the draft can be committed.
+- Architecture diagrams source of truth: `docs/architecture_diagrams.md`.
+  The current Canva board is a responsive single-page design-system board; the available Canva edit tools can update text but cannot add the requested new diagram pages to that existing board in this session.
 
 Implementation direction:
 
@@ -31,3 +33,17 @@ Operational intelligence cues:
 - Contacts show trust/category, phone, active state, and a detail workflow with scoped notes.
 - Events show lifecycle state, target, recipients, schedule, and direct prepare/approve/cancel affordances.
 - Logs remain dense and filterable, with failure reasons kept visible in row previews.
+
+Canva diagram target:
+
+- Backend Database ERM
+- Android Room ERM
+- Gesamt-App Context
+- Backend Context
+- End-to-End Message Flow
+- Review Queue State Flow
+- Event Ticket Flow
+- Contact and Notes Flow
+- UI Navigation and Screen Flow
+- Android Worker and Service Flow
+- API Surface Map
