@@ -20,7 +20,8 @@ local.properties
 *.sqlite
 *.sqlite3
 *.log
+*.logcat
 crash_log.txt
 logs/
 backups/
-whatsapp_agent.db 
+whatsapp_agent.db
